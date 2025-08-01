@@ -102,6 +102,20 @@ export interface IMessage {
   metadata: Record<string, any>
 }
 
+// Agent message interface for CommunicationBus
+export interface AgentMessage {
+  id: string
+  from: string
+  to: string
+  type: MessageType
+  payload: any
+  priority: MessagePriority
+  timestamp: Date
+  metadata: Record<string, any>
+  requireResponse?: boolean
+  timeout?: number
+}
+
 // Message types
 export enum MessageType {
   COMMAND = 'command',

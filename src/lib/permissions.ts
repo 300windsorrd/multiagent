@@ -1,5 +1,7 @@
 import { db } from "./db"
 import { PermissionType } from ".prisma/client"
+import { getServerSession } from "next-auth"
+import { authOptions } from "./auth"
 
 export interface PermissionCheck {
   resource: string
@@ -394,4 +396,317 @@ export class PermissionManager {
       action: "admin",
     })
   }
+
+  // Role-based permission management
+  static async getUserRoles(userId: string): Promise<any[]> {
+    try {
+      const userRoles = await db.userRole.findMany({
+        where: { userId },
+        include: { role: true },
+      })
+      return userRoles.map(ur => ur.role)
+    } catch (error) {
+      console.error("Error getting user roles:", error)
+      return []
+    }
+  }
+
+  static async assignRole(userId: string, roleName: string): Promise<boolean> {
+    try {
+      const role = await db.role.findUnique({
+        where: { name: roleName },
+      })
+
+      if (!role) {
+        return false
+      }
+
+      await db.userRole.upsert({
+        where: {
+          userId_roleId: {
+            userId,
+            roleId: role.id,
+          },
+        },
+        update: {},
+        create: {
+          userId,
+          roleId: role.id,
+        },
+      })
+
+      return true
+    } catch (error) {
+      console.error("Error assigning role:", error)
+      return false
+    }
+  }
+
+  static async removeRole(userId: string, roleName: string): Promise<boolean> {
+    try {
+      const role = await db.role.findUnique({
+        where: { name: roleName },
+      })
+
+      if (!role) {
+        return false
+      }
+
+      await db.userRole.deleteMany({
+        where: {
+          userId,
+          roleId: role.id,
+        },
+      })
+
+      return true
+    } catch (error) {
+      console.error("Error removing role:", error)
+      return false
+    }
+  }
+
+  static async hasRole(userId: string, roleName: string): Promise<boolean> {
+    try {
+      const roles = await this.getUserRoles(userId)
+      return roles.some(role => role.name === roleName)
+    } catch (error) {
+      console.error("Error checking role:", error)
+      return false
+    }
+  }
+
+  static async hasAnyRole(userId: string, roleNames: string[]): Promise<boolean> {
+    try {
+      const roles = await this.getUserRoles(userId)
+      return roles.some(role => roleNames.includes(role.name))
+    } catch (error) {
+      console.error("Error checking roles:", error)
+      return false
+    }
+  }
+
+  static async hasAllRoles(userId: string, roleNames: string[]): Promise<boolean> {
+    try {
+      const roles = await this.getUserRoles(userId)
+      return roleNames.every(roleName => roles.some(role => role.name === roleName))
+    } catch (error) {
+      console.error("Error checking roles:", error)
+      return false
+    }
+  }
+
+  // Initialize default roles and permissions
+  static async initializeDefaultRoles(): Promise<void> {
+    const defaultRoles = [
+      {
+        name: "ADMIN",
+        description: "System administrator with full access",
+        permissions: [
+          "read:agents",
+          "write:agents",
+          "delete:agents",
+          "execute:agents",
+          "read:workflows",
+          "write:workflows",
+          "execute:workflows",
+          "read:oauth_tokens",
+          "write:oauth_tokens",
+          "delete:oauth_tokens",
+          "admin:users",
+          "admin:permissions",
+        ],
+      },
+      {
+        name: "USER",
+        description: "Regular user with basic access",
+        permissions: [
+          "read:agents",
+          "write:agents",
+          "execute:agents",
+          "read:workflows",
+          "write:workflows",
+          "execute:workflows",
+          "read:oauth_tokens",
+          "write:oauth_tokens",
+        ],
+      },
+      {
+        name: "VIEWER",
+        description: "Read-only access",
+        permissions: [
+          "read:agents",
+          "read:workflows",
+          "read:oauth_tokens",
+        ],
+      },
+    ]
+
+    for (const roleData of defaultRoles) {
+      try {
+        // Create or update role
+        const role = await db.role.upsert({
+          where: { name: roleData.name },
+          update: { description: roleData.description },
+          create: {
+            name: roleData.name,
+            description: roleData.description,
+          },
+        })
+
+        // Assign permissions to role
+        for (const permissionName of roleData.permissions) {
+          const permission = await db.permission.findUnique({
+            where: { name: permissionName },
+          })
+
+          if (permission) {
+            await db.rolePermission.upsert({
+              where: {
+                roleId_permissionId: {
+                  roleId: role.id,
+                  permissionId: permission.id,
+                },
+              },
+              update: {},
+              create: {
+                roleId: role.id,
+                permissionId: permission.id,
+              },
+            })
+          }
+        }
+      } catch (error) {
+        console.error(`Error creating role ${roleData.name}:`, error)
+      }
+    }
+  }
+
+  // Get current user ID from session
+  static async getCurrentUserId(): Promise<string | null> {
+    try {
+      const session = await getServerSession(authOptions)
+      return session?.user?.id || null
+    } catch (error) {
+      console.error("Error getting current user ID:", error)
+      return null
+    }
+  }
+
+  // Check if current user has permission
+  static async currentUserHasPermission(check: PermissionCheck): Promise<boolean> {
+    const userId = await this.getCurrentUserId()
+    if (!userId) return false
+    return this.hasPermission(userId, check)
+  }
+
+  // Check if current user has role
+  static async currentUserHasRole(roleName: string): Promise<boolean> {
+    const userId = await this.getCurrentUserId()
+    if (!userId) return false
+    return this.hasRole(userId, roleName)
+  }
+
+  // Get all permissions for current user
+  static async getCurrentUserPermissions(): Promise<UserPermission[]> {
+    const userId = await this.getCurrentUserId()
+    if (!userId) return []
+    return this.getUserPermissions(userId)
+  }
+
+  // Resource-based permission checking with ownership
+  static async canAccessResource(
+    userId: string,
+    resourceType: string,
+    resourceId: string,
+    action: string
+  ): Promise<boolean> {
+    try {
+      // Check basic permission first
+      const hasBasicPermission = await this.hasPermission(userId, {
+        resource: resourceType,
+        action,
+      })
+
+      if (!hasBasicPermission) {
+        return false
+      }
+
+      // Check ownership for certain resource types
+      if (resourceType === "agents" || resourceType === "workflows") {
+        const resource = await db.agent.findUnique({
+          where: { id: resourceId },
+          select: { userId: true },
+        })
+
+        if (resource && resource.userId !== userId) {
+          // Check if user has admin permission to access other users' resources
+          return await this.isAdmin(userId)
+        }
+      }
+
+      return true
+    } catch (error) {
+      console.error("Error checking resource access:", error)
+      return false
+    }
+  }
+
+  // Batch permission checking for optimization
+  static async checkMultiplePermissions(
+    userId: string,
+    checks: PermissionCheck[]
+  ): Promise<Record<string, boolean>> {
+    const results: Record<string, boolean> = {}
+    
+    // Get all user permissions once
+    const userPermissions = await this.getUserPermissions(userId)
+    
+    for (const check of checks) {
+      const key = `${check.resource}:${check.action}`
+      results[key] = this.checkPermissionAgainstList(userPermissions, check)
+    }
+    
+    return results
+  }
+
+  private static checkPermissionAgainstList(
+    permissions: UserPermission[],
+    check: PermissionCheck
+  ): boolean {
+    const matchingPermission = permissions.find(
+      (p) =>
+        p.resource === check.resource &&
+        p.action === check.action &&
+        p.granted
+    )
+
+    if (!matchingPermission) {
+      return false
+    }
+
+    // Check conditions if they exist
+    if (check.conditions && matchingPermission.conditions) {
+      return this.evaluateConditions(
+        check.conditions,
+        matchingPermission.conditions
+      )
+    }
+
+    return true
+  }
+}
+
+// Export a convenience function for direct permission checking
+export async function hasPermission(
+  userId: string,
+  action: string,
+  resource: string,
+  conditions?: Record<string, any>
+): Promise<boolean> {
+  return PermissionManager.hasPermission(userId, {
+    action,
+    resource,
+    conditions,
+  })
 }

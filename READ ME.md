@@ -26,7 +26,7 @@ BuilderAgent integrates features from:
 
 ## 🏁 Getting Started
 ```bash
-git clone https://github.com/your-org/builder-agent.git
+git clone https://github.com/300windsorrd/multiagent.git
 cd builder-agent
 npm install
 npm run dev

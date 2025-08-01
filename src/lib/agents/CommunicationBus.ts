@@ -1,612 +1,343 @@
-import {
-  ILogger,
-  IMonitoringService,
-  IErrorHandler,
-  IAgentRegistry
-} from './types'
 import { EventEmitter } from 'events'
-import { v4 as uuidv4 } from 'uuid'
+import { MessageBroker } from './MessageBroker'
+import { MessageQueue } from './MessageQueue'
+import { BaseAgent } from './BaseAgent'
+import { AgentMessage, MessagePriority, MessageType } from './types'
 
-interface ICommunicationBus {
-  sendMessage(message: any): Promise<string>
-  broadcastMessage(message: any, excludeAgentId?: string): Promise<string[]>
-  subscribe(agentId: string, messageType: string, handler: any): Promise<void>
-  unsubscribe(agentId: string, messageType: string, handler?: any): Promise<void>
-  addMessageFilter(agentId: string, filter: any): Promise<void>
-  removeMessageFilter(agentId: string, filterId: string): Promise<void>
-  getMessageHistory(agentId?: string, messageType?: string, limit?: number): Promise<any[]>
-  getCommunicationStats(agentId?: string): Promise<any>
-  createTopic(topicName: string): Promise<void>
-  subscribeToTopic(topicName: string, agentId: string, handler: any): Promise<void>
-  unsubscribeFromTopic(topicName: string, agentId: string): Promise<void>
-  publishToTopic(topicName: string, message: any): Promise<string[]>
-}
+export class CommunicationBus extends EventEmitter {
+  private messageBroker: MessageBroker
+  private messageQueue: MessageQueue
+  private agents: Map<string, BaseAgent> = new Map()
+  private subscriptions: Map<string, Set<string>> = new Map() // topic -> agentIds
+  private isRunning: boolean = false
 
-export class CommunicationBus extends EventEmitter implements ICommunicationBus {
-  private logger: ILogger
-  private monitoringService: IMonitoringService
-  private errorHandler: IErrorHandler
-  private agentRegistry: IAgentRegistry
-  private messageHandlers: Map<string, MessageHandler[]> = new Map()
-  private messageHistory: Map<string, MessageHistoryEntry[]> = new Map()
-  private subscriptions: Map<string, Subscription[]> = new Map()
-  private messageFilters: Map<string, MessageFilter[]> = new Map()
-  private maxHistorySize: number = 1000
-  private messageTimeout: number = 30000 // 30 seconds
-
-  constructor(
-    logger: ILogger,
-    monitoringService: IMonitoringService,
-    errorHandler: IErrorHandler,
-    agentRegistry: IAgentRegistry
-  ) {
+  constructor() {
     super()
-    this.logger = logger
-    this.monitoringService = monitoringService
-    this.errorHandler = errorHandler
-    this.agentRegistry = agentRegistry
+    this.messageBroker = new MessageBroker()
+    this.messageQueue = new MessageQueue()
+    this.setupEventHandlers()
   }
 
-  async sendMessage(message: Omit<IMessage, 'id' | 'timestamp'>): Promise<string> {
+  private setupEventHandlers(): void {
+    this.messageBroker.on('message', this.handleBrokerMessage.bind(this))
+    this.messageQueue.on('message', this.handleQueuedMessage.bind(this))
+    this.messageQueue.on('error', this.handleQueueError.bind(this))
+  }
+
+  public async start(): Promise<void> {
+    if (this.isRunning) {
+      return
+    }
+
     try {
-      this.logger.info(`Sending message from ${message.fromAgentId} to ${message.toAgentId}`, { message })
-
-      // Create full message object
-      const fullMessage: IMessage = {
-        ...message,
-        id: uuidv4(),
-        timestamp: new Date()
-      }
-
-      // Add to history
-      await this.addToHistory(fullMessage)
-
-      // Process message
-      await this.processMessage(fullMessage)
-
-      this.logger.info(`Message sent successfully from ${message.fromAgentId} to ${message.toAgentId}`, {
-        messageId: fullMessage.id,
-        fromAgentId: message.fromAgentId,
-        toAgentId: message.toAgentId,
-        messageType: message.type
-      })
-
-      // Record metric
-      await this.monitoringService.recordMetric(message.fromAgentId, {
-        id: uuidv4(),
-        agentId: message.fromAgentId,
-        type: 'COMMUNICATION' as any,
-        name: 'messages_sent',
-        value: 1,
-        unit: 'count',
-        timestamp: new Date(),
-        metadata: { toAgentId: message.toAgentId, messageType: message.type }
-      })
-
-      // Emit event
-      this.emit('messageSent', { message: fullMessage })
-
-      return fullMessage.id
+      await this.messageBroker.start()
+      await this.messageQueue.start()
+      this.isRunning = true
+      this.emit('started')
     } catch (error) {
-      this.logger.error(`Failed to send message from ${message.fromAgentId} to ${message.toAgentId}`, error as Error, { message })
+      this.emit('error', error)
       throw error
     }
   }
 
-  async broadcastMessage(message: Omit<IMessage, 'id' | 'timestamp' | 'toAgentId'>, excludeAgentId?: string): Promise<string[]> {
+  public async stop(): Promise<void> {
+    if (!this.isRunning) {
+      return
+    }
+
     try {
-      this.logger.info(`Broadcasting message from ${message.fromAgentId}`, { message })
-
-      const messageIds: string[] = []
-      const agents = this.agentRegistry.getAllAgents()
-
-      for (const [agentId, agent] of agents) {
-        if (agentId === excludeAgentId) continue
-
-        try {
-          const messageId = await this.sendMessage({
-            ...message,
-            toAgentId: agentId
-          })
-          messageIds.push(messageId)
-        } catch (error) {
-          this.logger.error(`Failed to send broadcast message to agent ${agentId}`, error as Error, { agentId })
-        }
-      }
-
-      this.logger.info(`Broadcast message sent from ${message.fromAgentId} to ${messageIds.length} agents`, {
-        fromAgentId: message.fromAgentId,
-        recipientCount: messageIds.length,
-        messageType: message.type
-      })
-
-      return messageIds
+      await this.messageQueue.stop()
+      await this.messageBroker.stop()
+      this.isRunning = false
+      this.emit('stopped')
     } catch (error) {
-      this.logger.error(`Failed to broadcast message from ${message.fromAgentId}`, error as Error, { message })
+      this.emit('error', error)
       throw error
     }
   }
 
-  async subscribe(agentId: string, messageType: string, handler: MessageHandler): Promise<void> {
-    try {
-      this.logger.info(`Agent ${agentId} subscribing to message type ${messageType}`, { agentId, messageType })
-
-      const key = `${agentId}:${messageType}`
-      if (!this.messageHandlers.has(key)) {
-        this.messageHandlers.set(key, [])
-      }
-
-      const handlers = this.messageHandlers.get(key)!
-      handlers.push(handler)
-
-      this.logger.info(`Agent ${agentId} subscribed successfully to message type ${messageType}`, { agentId, messageType })
-    } catch (error) {
-      this.logger.error(`Failed to subscribe agent ${agentId} to message type ${messageType}`, error as Error, { agentId, messageType })
-      throw error
+  public registerAgent(agent: BaseAgent): void {
+    if (this.agents.has(agent.id)) {
+      throw new Error(`Agent with ID ${agent.id} is already registered`)
     }
-  }
 
-  async unsubscribe(agentId: string, messageType: string, handler?: MessageHandler): Promise<void> {
-    try {
-      this.logger.info(`Agent ${agentId} unsubscribing from message type ${messageType}`, { agentId, messageType })
-
-      const key = `${agentId}:${messageType}`
-      const handlers = this.messageHandlers.get(key)
-
-      if (handlers) {
-        if (handler) {
-          // Remove specific handler
-          const index = handlers.indexOf(handler)
-          if (index !== -1) {
-            handlers.splice(index, 1)
-          }
-        } else {
-          // Remove all handlers for this message type
-          this.messageHandlers.delete(key)
-        }
-
-        this.logger.info(`Agent ${agentId} unsubscribed successfully from message type ${messageType}`, { agentId, messageType })
-      } else {
-        this.logger.warn(`No subscription found for agent ${agentId} to message type ${messageType}`, { agentId, messageType })
-      }
-    } catch (error) {
-      this.logger.error(`Failed to unsubscribe agent ${agentId} from message type ${messageType}`, error as Error, { agentId, messageType })
-      throw error
-    }
-  }
-
-  async addMessageFilter(agentId: string, filter: MessageFilter): Promise<void> {
-    try {
-      this.logger.info(`Adding message filter for agent ${agentId}`, { agentId, filter })
-
-      if (!this.messageFilters.has(agentId)) {
-        this.messageFilters.set(agentId, [])
-      }
-
-      const filters = this.messageFilters.get(agentId)!
-      filters.push(filter)
-
-      this.logger.info(`Message filter added successfully for agent ${agentId}`, { agentId })
-    } catch (error) {
-      this.logger.error(`Failed to add message filter for agent ${agentId}`, error as Error, { agentId, filter })
-      throw error
-    }
-  }
-
-  async removeMessageFilter(agentId: string, filterId: string): Promise<void> {
-    try {
-      this.logger.info(`Removing message filter for agent ${agentId}`, { agentId, filterId })
-
-      const filters = this.messageFilters.get(agentId)
-      if (filters) {
-        const index = filters.findIndex(f => f.id === filterId)
-        if (index !== -1) {
-          filters.splice(index, 1)
-          this.logger.info(`Message filter removed successfully for agent ${agentId}`, { agentId, filterId })
-        } else {
-          this.logger.warn(`Message filter not found for agent ${agentId}`, { agentId, filterId })
-        }
-      }
-    } catch (error) {
-      this.logger.error(`Failed to remove message filter for agent ${agentId}`, error as Error, { agentId, filterId })
-      throw error
-    }
-  }
-
-  async getMessageHistory(agentId?: string, messageType?: string, limit?: number): Promise<IMessage[]> {
-    try {
-      let messages: IMessage[] = []
-
-      if (agentId) {
-        // Get history for specific agent
-        const history = this.messageHistory.get(agentId)
-        if (history) {
-          messages = history.map(entry => entry.message)
-        }
-      } else {
-        // Get history for all agents
-        for (const history of this.messageHistory.values()) {
-          messages.push(...history.map(entry => entry.message))
-        }
-      }
-
-      // Filter by message type if specified
-      if (messageType) {
-        messages = messages.filter(msg => msg.type === messageType)
-      }
-
-      // Sort by timestamp (newest first)
-      messages.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-
-      // Apply limit
-      if (limit && limit > 0) {
-        messages = messages.slice(0, limit)
-      }
-
-      return messages
-    } catch (error) {
-      this.logger.error('Failed to get message history', error as Error, { agentId, messageType, limit })
-      throw error
-    }
-  }
-
-  async getCommunicationStats(agentId?: string): Promise<CommunicationStats> {
-    try {
-      let totalMessages = 0
-      let messagesByType: Record<string, number> = {}
-      let messagesByAgent: Record<string, number> = {}
-
-      if (agentId) {
-        // Get stats for specific agent
-        const history = this.messageHistory.get(agentId)
-        if (history) {
-          totalMessages = history.length
-          
-          for (const entry of history) {
-            const message = entry.message
-            
-            // Count by type
-            messagesByType[message.type] = (messagesByType[message.type] || 0) + 1
-            
-            // Count by agent (from and to)
-            messagesByAgent[message.fromAgentId] = (messagesByAgent[message.fromAgentId] || 0) + 1
-            messagesByAgent[message.toAgentId] = (messagesByAgent[message.toAgentId] || 0) + 1
-          }
-        }
-      } else {
-        // Get stats for all agents
-        for (const history of this.messageHistory.values()) {
-          totalMessages += history.length
-          
-          for (const entry of history) {
-            const message = entry.message
-            
-            // Count by type
-            messagesByType[message.type] = (messagesByType[message.type] || 0) + 1
-            
-            // Count by agent (from and to)
-            messagesByAgent[message.fromAgentId] = (messagesByAgent[message.fromAgentId] || 0) + 1
-            messagesByAgent[message.toAgentId] = (messagesByAgent[message.toAgentId] || 0) + 1
-          }
-        }
-      }
-
-      return {
-        totalMessages,
-        messagesByType,
-        messagesByAgent
-      }
-    } catch (error) {
-      this.logger.error('Failed to get communication stats', error as Error, { agentId })
-      throw error
-    }
-  }
-
-  async createTopic(topicName: string): Promise<void> {
-    try {
-      this.logger.info(`Creating topic ${topicName}`, { topicName })
-
-      if (this.subscriptions.has(topicName)) {
-        this.logger.warn(`Topic ${topicName} already exists`, { topicName })
-        return
-      }
-
-      this.subscriptions.set(topicName, [])
-
-      this.logger.info(`Topic ${topicName} created successfully`, { topicName })
-    } catch (error) {
-      this.logger.error(`Failed to create topic ${topicName}`, error as Error, { topicName })
-      throw error
-    }
-  }
-
-  async subscribeToTopic(topicName: string, agentId: string, handler: MessageHandler): Promise<void> {
-    try {
-      this.logger.info(`Agent ${agentId} subscribing to topic ${topicName}`, { agentId, topicName })
-
-      if (!this.subscriptions.has(topicName)) {
-        await this.createTopic(topicName)
-      }
-
-      const subscriptions = this.subscriptions.get(topicName)!
-      
-      const subscription: Subscription = {
-        id: uuidv4(),
-        topicName,
-        agentId,
-        handler,
-        subscribedAt: new Date()
-      }
-      
-      subscriptions.push(subscription)
-
-      this.logger.info(`Agent ${agentId} subscribed successfully to topic ${topicName}`, { agentId, topicName })
-    } catch (error) {
-      this.logger.error(`Failed to subscribe agent ${agentId} to topic ${topicName}`, error as Error, { agentId, topicName })
-      throw error
-    }
-  }
-
-  async unsubscribeFromTopic(topicName: string, agentId: string): Promise<void> {
-    try {
-      this.logger.info(`Agent ${agentId} unsubscribing from topic ${topicName}`, { agentId, topicName })
-
-      const subscriptions = this.subscriptions.get(topicName)
-      if (subscriptions) {
-        const index = subscriptions.findIndex(sub => sub.agentId === agentId)
-        if (index !== -1) {
-          subscriptions.splice(index, 1)
-          this.logger.info(`Agent ${agentId} unsubscribed successfully from topic ${topicName}`, { agentId, topicName })
-        } else {
-          this.logger.warn(`No subscription found for agent ${agentId} to topic ${topicName}`, { agentId, topicName })
-        }
-      }
-    } catch (error) {
-      this.logger.error(`Failed to unsubscribe agent ${agentId} from topic ${topicName}`, error as Error, { agentId, topicName })
-      throw error
-    }
-  }
-
-  async publishToTopic(topicName: string, message: Omit<IMessage, 'id' | 'timestamp' | 'toAgentId'>): Promise<string[]> {
-    try {
-      this.logger.info(`Publishing message to topic ${topicName}`, { topicName, message })
-
-      const subscriptions = this.subscriptions.get(topicName)
-      if (!subscriptions || subscriptions.length === 0) {
-        this.logger.warn(`No subscriptions found for topic ${topicName}`, { topicName })
-        return []
-      }
-
-      const messageIds: string[] = []
-
-      for (const subscription of subscriptions) {
-        try {
-          const messageId = await this.sendMessage({
-            ...message,
-            toAgentId: subscription.agentId
-          })
-          messageIds.push(messageId)
-        } catch (error) {
-          this.logger.error(`Failed to publish message to agent ${subscription.agentId}`, error as Error, { agentId: subscription.agentId })
-        }
-      }
-
-      this.logger.info(`Message published to topic ${topicName} for ${messageIds.length} agents`, {
-        topicName,
-        recipientCount: messageIds.length,
-        messageType: message.type
-      })
-
-      return messageIds
-    } catch (error) {
-      this.logger.error(`Failed to publish message to topic ${topicName}`, error as Error, { topicName, message })
-      throw error
-    }
-  }
-
-  private async processMessage(message: IMessage): Promise<void> {
-    try {
-      // Check if message should be filtered
-      if (await this.shouldFilterMessage(message)) {
-        this.logger.debug(`Message filtered for agent ${message.toAgentId}`, { messageId: message.id })
-        return
-      }
-
-      // Get handlers for this message type and agent
-      const key = `${message.toAgentId}:${message.type}`
-      const handlers = this.messageHandlers.get(key)
-
-      if (handlers && handlers.length > 0) {
-        // Get the target agent
-        const agent = this.agentRegistry.getAgent(message.toAgentId)
-        if (!agent) {
-          this.logger.warn(`Target agent ${message.toAgentId} not found`, { messageId: message.id })
-          return
-        }
-
-        // Execute all handlers
-        for (const handler of handlers) {
-          try {
-            await handler(message, agent)
-          } catch (error) {
-            this.logger.error(`Message handler failed for message ${message.id}`, error as Error, { messageId: message.id })
-            
-            // Record error
-            await this.monitoringService.recordMetric(message.fromAgentId, {
-              id: uuidv4(),
-              agentId: message.fromAgentId,
-              type: 'COMMUNICATION' as any,
-              name: 'message_handler_errors',
-              value: 1,
-              unit: 'count',
-              timestamp: new Date(),
-              metadata: { messageId: message.id, toAgentId: message.toAgentId }
-            })
-          }
-        }
-      } else {
-        this.logger.debug(`No handlers found for message type ${message.type} for agent ${message.toAgentId}`, {
-          messageId: message.id,
-          messageType: message.type,
-          toAgentId: message.toAgentId
-        })
-      }
-
-      // Record metric
-      await this.monitoringService.recordMetric(message.toAgentId, {
-        id: uuidv4(),
-        agentId: message.toAgentId,
-        type: 'COMMUNICATION' as any,
-        name: 'messages_received',
-        value: 1,
-        unit: 'count',
-        timestamp: new Date(),
-        metadata: { fromAgentId: message.fromAgentId, messageType: message.type }
-      })
-
-      // Emit event
-      this.emit('messageReceived', { message })
-    } catch (error) {
-      this.logger.error(`Failed to process message ${message.id}`, error as Error, { messageId: message.id })
-      throw error
-    }
-  }
-
-  private async shouldFilterMessage(message: IMessage): Promise<boolean> {
-    try {
-      const filters = this.messageFilters.get(message.toAgentId)
-      if (!filters || filters.length === 0) {
-        return false
-      }
-
-      for (const filter of filters) {
-        try {
-          if (await filter.filter(message)) {
-            return true
-          }
-        } catch (error) {
-          this.logger.error(`Message filter failed for agent ${message.toAgentId}`, error as Error, { 
-            agentId: message.toAgentId,
-            filterId: filter.id,
-            messageId: message.id
-          })
-        }
-      }
-
-      return false
-    } catch (error) {
-      this.logger.error(`Failed to check message filters for agent ${message.toAgentId}`, error as Error, { 
-        agentId: message.toAgentId,
-        messageId: message.id
-      })
-      return false
-    }
-  }
-
-  private async addToHistory(message: IMessage): Promise<void> {
-    try {
-      if (!this.messageHistory.has(message.toAgentId)) {
-        this.messageHistory.set(message.toAgentId, [])
-      }
-      
-      const history = this.messageHistory.get(message.toAgentId)!
-      
-      const historyEntry: MessageHistoryEntry = {
-        message,
-        receivedAt: new Date(),
-        processed: false
-      }
-      
-      history.push(historyEntry)
-      
-      // Keep only recent history
-      if (history.length > this.maxHistorySize) {
-        history.splice(0, history.length - this.maxHistorySize)
-      }
-    } catch (error) {
-      this.logger.error(`Failed to add message to history for agent ${message.toAgentId}`, error as Error, { 
-        agentId: message.toAgentId,
-        messageId: message.id
-      })
-    }
-  }
-
-  // Utility methods
-  getActiveTopics(): string[] {
-    return Array.from(this.subscriptions.keys())
-  }
-
-  getTopicSubscriptions(topicName: string): Subscription[] {
-    return this.subscriptions.get(topicName) || []
-  }
-
-  getAgentSubscriptions(agentId: string): string[] {
-    const topics: string[] = []
+    this.agents.set(agent.id, agent)
     
-    for (const [topicName, subscriptions] of this.subscriptions.entries()) {
-      if (subscriptions.some(sub => sub.agentId === agentId)) {
-        topics.push(topicName)
+    // Set up agent-specific message handler
+    agent.on('message', this.handleAgentMessage.bind(this))
+    
+    this.emit('agentRegistered', agent)
+  }
+
+  public unregisterAgent(agentId: string): void {
+    const agent = this.agents.get(agentId)
+    if (!agent) {
+      return
+    }
+
+    // Remove agent from all subscriptions
+    for (const [topic, subscribers] of this.subscriptions.entries()) {
+      subscribers.delete(agentId)
+      if (subscribers.size === 0) {
+        this.subscriptions.delete(topic)
       }
     }
+
+    // Remove agent from registry
+    this.agents.delete(agentId)
     
-    return topics
+    // Remove agent event listeners
+    agent.removeAllListeners('message')
+    
+    this.emit('agentUnregistered', agentId)
   }
 
-  getMessageHandlersCount(): number {
-    let count = 0
-    for (const handlers of this.messageHandlers.values()) {
-      count += handlers.length
+  public subscribe(agentId: string, topic: string): void {
+    if (!this.agents.has(agentId)) {
+      throw new Error(`Agent ${agentId} is not registered`)
     }
-    return count
-  }
 
-  getMessageFiltersCount(): number {
-    let count = 0
-    for (const filters of this.messageFilters.values()) {
-      count += filters.length
+    if (!this.subscriptions.has(topic)) {
+      this.subscriptions.set(topic, new Set())
     }
-    return count
+
+    this.subscriptions.get(topic)!.add(agentId)
+    this.emit('subscribed', { agentId, topic })
   }
-}
 
-interface IMessage {
-  id: string
-  fromAgentId: string
-  toAgentId: string
-  type: string
-  data: any
-  priority?: number
-  timeout?: number
-  timestamp: Date
-  metadata?: any
-}
+  public unsubscribe(agentId: string, topic: string): void {
+    const subscribers = this.subscriptions.get(topic)
+    if (subscribers) {
+      subscribers.delete(agentId)
+      if (subscribers.size === 0) {
+        this.subscriptions.delete(topic)
+      }
+      this.emit('unsubscribed', { agentId, topic })
+    }
+  }
 
-interface MessageHandler {
-  (message: IMessage, agent: any): Promise<void>
-}
+  public async sendMessage(
+    fromAgentId: string,
+    toAgentId: string,
+    type: MessageType,
+    payload: any,
+    priority: MessagePriority = MessagePriority.NORMAL,
+    options: {
+      requireResponse?: boolean
+      timeout?: number
+      metadata?: Record<string, any>
+    } = {}
+  ): Promise<any> {
+    if (!this.agents.has(fromAgentId)) {
+      throw new Error(`Sender agent ${fromAgentId} is not registered`)
+    }
 
-interface MessageFilter {
-  id: string
-  name: string
-  filter: (message: IMessage) => Promise<boolean>
-}
+    if (!this.agents.has(toAgentId)) {
+      throw new Error(`Recipient agent ${toAgentId} is not registered`)
+    }
 
-interface MessageHistoryEntry {
-  message: IMessage
-  receivedAt: Date
-  processed: boolean
-}
+    const message: AgentMessage = {
+      id: this.generateMessageId(),
+      from: fromAgentId,
+      to: toAgentId,
+      type,
+      payload,
+      priority,
+      timestamp: new Date(),
+      metadata: options.metadata || {},
+      requireResponse: options.requireResponse || false,
+      timeout: options.timeout || 30000 // 30 seconds default
+    }
 
-interface Subscription {
-  id: string
-  topicName: string
-  agentId: string
-  handler: MessageHandler
-  subscribedAt: Date
-}
+    try {
+      if (priority === MessagePriority.HIGH) {
+        // High priority messages are sent immediately
+        await this.messageBroker.deliverMessage(message)
+      } else {
+        // Other messages are queued
+        await this.messageQueue.enqueue(message)
+      }
 
-interface CommunicationStats {
-  totalMessages: number
-  messagesByType: Record<string, number>
-  messagesByAgent: Record<string, number>
+      this.emit('messageSent', message)
+
+      if (message.requireResponse) {
+        return await this.waitForResponse(message.id, message.timeout || 30000) // Default 30 seconds
+      }
+
+      return { success: true, messageId: message.id }
+    } catch (error) {
+      this.emit('messageError', { message, error })
+      throw error
+    }
+  }
+
+  public async broadcast(
+    fromAgentId: string,
+    topic: string,
+    type: MessageType,
+    payload: any,
+    priority: MessagePriority = MessagePriority.NORMAL
+  ): Promise<void> {
+    if (!this.agents.has(fromAgentId)) {
+      throw new Error(`Sender agent ${fromAgentId} is not registered`)
+    }
+
+    const subscribers = this.subscriptions.get(topic)
+    if (!subscribers || subscribers.size === 0) {
+      return
+    }
+
+    const promises: Promise<void>[] = []
+    
+    for (const toAgentId of subscribers) {
+      if (toAgentId !== fromAgentId) {
+        promises.push(
+          this.sendMessage(fromAgentId, toAgentId, type, payload, priority)
+        )
+      }
+    }
+
+    await Promise.allSettled(promises)
+    this.emit('broadcast', { fromAgentId, topic, type, payload })
+  }
+
+  public async publish(
+    fromAgentId: string,
+    topic: string,
+    type: MessageType,
+    payload: any
+  ): Promise<void> {
+    if (!this.agents.has(fromAgentId)) {
+      throw new Error(`Sender agent ${fromAgentId} is not registered`)
+    }
+
+    const message: AgentMessage = {
+      id: this.generateMessageId(),
+      from: fromAgentId,
+      to: 'broadcast',
+      type,
+      payload,
+      priority: MessagePriority.NORMAL,
+      timestamp: new Date(),
+      metadata: { topic },
+      requireResponse: false
+    }
+
+    await this.messageBroker.publish(topic, message)
+    this.emit('published', { topic, message })
+  }
+
+  public getRegisteredAgents(): string[] {
+    return Array.from(this.agents.keys())
+  }
+
+  public getSubscriptions(topic: string): string[] {
+    const subscribers = this.subscriptions.get(topic)
+    return subscribers ? Array.from(subscribers) : []
+  }
+
+  public getSystemStatus(): {
+    isRunning: boolean
+    registeredAgents: number
+    activeSubscriptions: number
+    queueSize: number
+  } {
+    return {
+      isRunning: this.isRunning,
+      registeredAgents: this.agents.size,
+      activeSubscriptions: Array.from(this.subscriptions.values())
+        .reduce((total, subs) => total + subs.size, 0),
+      queueSize: this.messageQueue.getSize()
+    }
+  }
+
+  private async handleBrokerMessage(message: AgentMessage): Promise<void> {
+    if (message.to === 'broadcast') {
+      await this.handleBroadcastMessage(message)
+    } else {
+      await this.handleDirectMessage(message)
+    }
+  }
+
+  private async handleQueuedMessage(message: AgentMessage): Promise<void> {
+    await this.handleDirectMessage(message)
+  }
+
+  private async handleDirectMessage(message: AgentMessage): Promise<void> {
+    const recipient = this.agents.get(message.to)
+    if (!recipient) {
+      this.emit('messageError', { 
+        message, 
+        error: new Error(`Recipient agent ${message.to} not found`) 
+      })
+      return
+    }
+
+    try {
+      await recipient.receiveMessage(message)
+      this.emit('messageDelivered', message)
+    } catch (error) {
+      this.emit('messageError', { message, error })
+    }
+  }
+
+  private async handleBroadcastMessage(message: AgentMessage): Promise<void> {
+    const topic = message.metadata?.topic
+    if (!topic) {
+      return
+    }
+
+    const subscribers = this.subscriptions.get(topic)
+    if (!subscribers) {
+      return
+    }
+
+    const promises: Promise<void>[] = []
+    
+    for (const agentId of subscribers) {
+      if (agentId !== message.from) {
+        const recipient = this.agents.get(agentId)
+        if (recipient) {
+          promises.push(recipient.receiveMessage(message))
+        }
+      }
+    }
+
+    await Promise.allSettled(promises)
+    this.emit('broadcastDelivered', { topic, message })
+  }
+
+  private handleAgentMessage(message: AgentMessage): void {
+    // Handle messages sent from agents to the communication bus
+    if (message.to === 'broadcast') {
+      this.publish(message.from, message.metadata?.topic || 'general', message.type, message.payload)
+    } else {
+      this.messageQueue.enqueue(message)
+    }
+  }
+
+  private handleQueueError(error: Error): void {
+    this.emit('error', error)
+  }
+
+  private async waitForResponse(messageId: string, timeout: number): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.removeListener(`response:${messageId}`, responseHandler)
+        reject(new Error(`Response timeout for message ${messageId}`))
+      }, timeout)
+
+      const responseHandler = (response: any) => {
+        clearTimeout(timer)
+        this.removeListener(`response:${messageId}`, responseHandler)
+        resolve(response)
+      }
+
+      this.once(`response:${messageId}`, responseHandler)
+    })
+  }
+
+  private generateMessageId(): string {
+    return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  }
 }

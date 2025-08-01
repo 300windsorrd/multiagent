@@ -187,6 +187,7 @@ model User {
   posts         Post[]
   sessions      UserSession[]
   permissions   UserPermission[]
+  userRoles     UserRole[]
   agents        Agent[]
   workflows     Workflow[]
   auditLogs     AuditLog[]
@@ -502,6 +503,7 @@ model Permission {
   
   // Relationships
   userPermissions UserPermission[]
+  rolePermissions RolePermission[]
   
   @@map("permissions")
   @@index([type])
@@ -528,6 +530,66 @@ model UserPermission {
   @@index([userId])
   @@index([permissionId])
   @@unique([userId, permissionId])
+}
+
+// Role-based access control models
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  
+  // Timestamp tracking
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  
+  // Relationships
+  userRoles   UserRole[]
+  rolePermissions RolePermission[]
+  
+  @@map("roles")
+  @@index([isActive])
+}
+
+// User role assignments
+model UserRole {
+  id        String   @id @default(cuid())
+  
+  // Timestamp tracking
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relationships
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleId    String
+  role      Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  
+  @@map("user_roles")
+  @@index([userId])
+  @@index([roleId])
+  @@unique([userId, roleId])
+}
+
+// Role permission assignments
+model RolePermission {
+  id        String   @id @default(cuid())
+  
+  // Timestamp tracking
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relationships
+  roleId       String
+  role         Role        @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissionId String
+  permission   Permission  @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  
+  @@map("role_permissions")
+  @@index([roleId])
+  @@index([permissionId])
+  @@unique([roleId, permissionId])
 }
 
 // Service connection management
