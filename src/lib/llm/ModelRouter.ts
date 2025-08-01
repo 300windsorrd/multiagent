@@ -1,15 +1,27 @@
 import { v4 as uuidv4 } from 'uuid'
-import { IOpenAIProvider, Model, CompletionRequest, ChatCompletionRequest, EmbeddingRequest } from './OpenAIProvider'
+import { IOpenAIProvider, Model as OpenAIModel, CompletionRequest, ChatCompletionRequest, EmbeddingRequest } from './OpenAIProvider'
+import { IAnthropicProvider, AnthropicModel } from './AnthropicProvider'
+
+// Generic provider interface that all providers should implement
+export interface ILLMProvider {
+  initialize(config: any): Promise<void>
+  getModels(): Promise<any[]>
+  getModelInfo(modelId: string): Promise<any | null>
+  getUsageStats(): Promise<any>
+  cancelRequest(requestId: string): Promise<boolean>
+  isInitialized(): boolean
+}
 
 export interface IModelRouter {
   initialize(config: ModelRouterConfig): Promise<void>
   routeRequest(request: RoutingRequest): Promise<RoutingResult>
-  addProvider(providerId: string, provider: IOpenAIProvider): Promise<void>
+  addProvider(providerId: string, provider: ILLMProvider, providerType: 'openai' | 'anthropic'): Promise<void>
   removeProvider(providerId: string): Promise<void>
   getProviders(): Promise<ProviderInfo[]>
   getRoutingStats(): Promise<RoutingStats>
   updateRoutingRules(rules: RoutingRule[]): Promise<void>
   optimizeRouting(): Promise<void>
+  getConfig(): ModelRouterConfig
 }
 
 export interface ModelRouterConfig {
@@ -62,7 +74,8 @@ export interface FallbackOption {
 export interface ProviderInfo {
   id: string
   name: string
-  models: Model[]
+  type: 'openai' | 'anthropic'
+  models: any[]
   capabilities: ProviderCapability[]
   status: 'active' | 'inactive' | 'error'
   lastUsed: Date
@@ -127,7 +140,7 @@ export interface RoutingAction {
 
 export class ModelRouter implements IModelRouter {
   private config!: ModelRouterConfig
-  private providers: Map<string, IOpenAIProvider> = new Map()
+  private providers: Map<string, { provider: ILLMProvider; type: 'openai' | 'anthropic' }> = new Map()
   private providerInfo: Map<string, ProviderInfo> = new Map()
   private routingRules: RoutingRule[] = []
   private routingStats: RoutingStats = {
@@ -195,7 +208,7 @@ export class ModelRouter implements IModelRouter {
     }
   }
 
-  async addProvider(providerId: string, provider: IOpenAIProvider): Promise<void> {
+  async addProvider(providerId: string, provider: ILLMProvider, providerType: 'openai' | 'anthropic'): Promise<void> {
     try {
       // Check if provider already exists
       if (this.providers.has(providerId)) {
@@ -203,15 +216,16 @@ export class ModelRouter implements IModelRouter {
       }
 
       // Add provider
-      this.providers.set(providerId, provider)
+      this.providers.set(providerId, { provider, type: providerType })
 
       // Get provider info
       const models = await provider.getModels()
       const providerInfo: ProviderInfo = {
         id: providerId,
         name: providerId,
+        type: providerType,
         models,
-        capabilities: this.inferCapabilities(models),
+        capabilities: this.inferCapabilities(models, providerType),
         status: 'active',
         lastUsed: new Date(),
         usageStats: {
@@ -226,7 +240,7 @@ export class ModelRouter implements IModelRouter {
       }
 
       this.providerInfo.set(providerId, providerInfo)
-      console.log(`Provider ${providerId} added successfully`)
+      console.log(`Provider ${providerId} (${providerType}) added successfully`)
     } catch (error) {
       console.error(`Failed to add provider ${providerId}:`, error)
       throw error
@@ -342,7 +356,7 @@ export class ModelRouter implements IModelRouter {
     const candidates: RoutingResult[] = []
 
     // Generate routing candidates
-    for (const [providerId, provider] of this.providers.entries()) {
+    for (const [providerId, providerWrapper] of this.providers.entries()) {
       const providerInfo = this.providerInfo.get(providerId)
       if (!providerInfo || providerInfo.status !== 'active') {
         continue
@@ -404,14 +418,12 @@ export class ModelRouter implements IModelRouter {
     }
 
     const suitableModels: string[] = []
+    const providerWrapper = this.providers.get(providerId)
 
     for (const model of providerInfo.models) {
-      // Check model capabilities
-      if (request.type === 'chat' && !model.id.includes('gpt')) {
-        continue
-      }
-
-      if (request.type === 'embedding' && !model.id.includes('embedding')) {
+      // Check model capabilities based on provider type
+      const isSuitable = await this.isModelSuitable(model, request.type, providerInfo.type)
+      if (!isSuitable) {
         continue
       }
 
@@ -434,15 +446,8 @@ export class ModelRouter implements IModelRouter {
 
     // Return first suitable model
     for (const model of providerInfo.models) {
-      if (requestType === 'chat' && model.id.includes('gpt')) {
-        return model.id
-      }
-
-      if (requestType === 'embedding' && model.id.includes('embedding')) {
-        return model.id
-      }
-
-      if (requestType === 'completion') {
+      const isSuitable = await this.isModelSuitable(model, requestType, providerInfo.type)
+      if (isSuitable) {
         return model.id
       }
     }
@@ -499,28 +504,55 @@ export class ModelRouter implements IModelRouter {
     }
   }
 
-  private inferCapabilities(models: Model[]): ProviderCapability[] {
+  private inferCapabilities(models: any[], providerType: 'openai' | 'anthropic'): ProviderCapability[] {
     const capabilities: ProviderCapability[] = []
 
-    const hasChatModels = models.some(m => m.id.includes('gpt'))
-    const hasEmbeddingModels = models.some(m => m.id.includes('embedding'))
+    if (providerType === 'openai') {
+      const hasChatModels = models.some((m: OpenAIModel) => m.id.includes('gpt'))
+      const hasEmbeddingModels = models.some((m: OpenAIModel) => m.id.includes('embedding'))
 
-    if (hasChatModels) {
-      capabilities.push({
-        name: 'chat',
-        version: '1.0',
-        supported: true,
-        parameters: {}
-      })
-    }
+      if (hasChatModels) {
+        capabilities.push({
+          name: 'chat',
+          version: '1.0',
+          supported: true,
+          parameters: {}
+        })
+      }
 
-    if (hasEmbeddingModels) {
-      capabilities.push({
-        name: 'embedding',
-        version: '1.0',
-        supported: true,
-        parameters: {}
-      })
+      if (hasEmbeddingModels) {
+        capabilities.push({
+          name: 'embedding',
+          version: '1.0',
+          supported: true,
+          parameters: {}
+        })
+      }
+    } else if (providerType === 'anthropic') {
+      const hasChatModels = models.some((m: AnthropicModel) =>
+        m.id.includes('claude') && m.capabilities?.chat
+      )
+      const hasEmbeddingModels = models.some((m: AnthropicModel) =>
+        m.id.includes('claude') && m.capabilities?.embeddings
+      )
+
+      if (hasChatModels) {
+        capabilities.push({
+          name: 'chat',
+          version: '1.0',
+          supported: true,
+          parameters: {}
+        })
+      }
+
+      if (hasEmbeddingModels) {
+        capabilities.push({
+          name: 'embedding',
+          version: '1.0',
+          supported: true,
+          parameters: {}
+        })
+      }
     }
 
     return capabilities
@@ -605,5 +637,33 @@ export class ModelRouter implements IModelRouter {
 
   getRoutingRules(): RoutingRule[] {
     return [...this.routingRules]
+  }
+
+  private async isModelSuitable(model: any, requestType: string, providerType: 'openai' | 'anthropic'): Promise<boolean> {
+    if (providerType === 'openai') {
+      const openaiModel = model as OpenAIModel
+      if (requestType === 'chat') {
+        return openaiModel.id.includes('gpt')
+      }
+      if (requestType === 'embedding') {
+        return openaiModel.id.includes('embedding')
+      }
+      if (requestType === 'completion') {
+        return true // Most OpenAI models support completion
+      }
+    } else if (providerType === 'anthropic') {
+      const anthropicModel = model as AnthropicModel
+      if (requestType === 'chat') {
+        return anthropicModel.capabilities?.chat || false
+      }
+      if (requestType === 'embedding') {
+        return anthropicModel.capabilities?.embeddings || false
+      }
+      if (requestType === 'completion') {
+        return anthropicModel.capabilities?.completion || false
+      }
+    }
+    
+    return false
   }
 }

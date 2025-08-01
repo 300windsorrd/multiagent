@@ -1,14 +1,12 @@
 import { v4 as uuidv4 } from 'uuid'
+import { ILLMProvider } from './ModelRouter'
 
-export interface IAnthropicProvider {
-  initialize(config: AnthropicConfig): Promise<void>
+export interface IAnthropicProvider extends ILLMProvider {
   generateCompletion(request: AnthropicCompletionRequest): Promise<AnthropicCompletionResponse>
   generateMessage(request: AnthropicMessageRequest): Promise<AnthropicMessageResponse>
   generateEmbeddings(request: AnthropicEmbeddingRequest): Promise<AnthropicEmbeddingResponse>
-  getModels(): Promise<AnthropicModel[]>
   getModelInfo(modelId: string): Promise<AnthropicModel | null>
   getUsageStats(): Promise<AnthropicUsageStats>
-  cancelRequest(requestId: string): Promise<boolean>
 }
 
 export interface AnthropicConfig {

@@ -1,14 +1,12 @@
 import { v4 as uuidv4 } from 'uuid'
+import { ILLMProvider } from './ModelRouter'
 
-export interface IOpenAIProvider {
-  initialize(config: OpenAIConfig): Promise<void>
+export interface IOpenAIProvider extends ILLMProvider {
   generateCompletion(request: CompletionRequest): Promise<CompletionResponse>
   generateChatCompletion(request: ChatCompletionRequest): Promise<ChatCompletionResponse>
   generateEmbeddings(request: EmbeddingRequest): Promise<EmbeddingResponse>
-  getModels(): Promise<Model[]>
   getModelInfo(modelId: string): Promise<Model | null>
   getUsageStats(): Promise<UsageStats>
-  cancelRequest(requestId: string): Promise<boolean>
 }
 
 export interface OpenAIConfig {

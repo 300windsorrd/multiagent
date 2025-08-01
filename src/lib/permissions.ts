@@ -2,6 +2,7 @@ import { db } from "./db"
 import { PermissionType } from ".prisma/client"
 import { getServerSession } from "next-auth"
 import { authOptions } from "./auth"
+import { AuthLogger } from "./auth-logger"
 
 export interface PermissionCheck {
   resource: string
@@ -45,6 +46,7 @@ export class PermissionManager {
       }))
     } catch (error) {
       console.error("Error getting user permissions:", error)
+      await AuthLogger.logError(userId, `Error getting user permissions: ${error instanceof Error ? error.message : String(error)}`, 'permission_manager', { userId })
       return []
     }
   }
@@ -79,6 +81,7 @@ export class PermissionManager {
       return true
     } catch (error) {
       console.error("Error checking permission:", error)
+      await AuthLogger.logError(userId, `Error checking permission: ${error instanceof Error ? error.message : String(error)}`, 'permission_manager', { userId, check })
       return false
     }
   }
@@ -96,6 +99,7 @@ export class PermissionManager {
       return false
     } catch (error) {
       console.error("Error checking permissions:", error)
+      await AuthLogger.logError(userId, `Error checking any permission: ${error instanceof Error ? error.message : String(error)}`, 'permission_manager', { userId, checks })
       return false
     }
   }
@@ -113,6 +117,7 @@ export class PermissionManager {
       return true
     } catch (error) {
       console.error("Error checking permissions:", error)
+      await AuthLogger.logError(userId, `Error checking all permissions: ${error instanceof Error ? error.message : String(error)}`, 'permission_manager', { userId, checks })
       return false
     }
   }
@@ -162,9 +167,17 @@ export class PermissionManager {
         })
       }
 
+      await AuthLogger.logEvent({
+        userId,
+        action: 'CREATE',
+        resource: 'permission',
+        context: { permissionName, conditions },
+        metadata: { permissionName, conditions }
+      })
       return true
     } catch (error) {
       console.error("Error granting permission:", error)
+      await AuthLogger.logError(userId, `Error granting permission: ${error instanceof Error ? error.message : String(error)}`, 'permission_manager', { userId, permissionName, conditions })
       return false
     }
   }
@@ -192,9 +205,17 @@ export class PermissionManager {
         },
       })
 
+      await AuthLogger.logEvent({
+        userId,
+        action: 'DELETE',
+        resource: 'permission',
+        context: { permissionName },
+        metadata: { permissionName }
+      })
       return true
     } catch (error) {
       console.error("Error revoking permission:", error)
+      await AuthLogger.logError(userId, `Error revoking permission: ${error instanceof Error ? error.message : String(error)}`, 'permission_manager', { userId, permissionName })
       return false
     }
   }
@@ -407,6 +428,7 @@ export class PermissionManager {
       return userRoles.map(ur => ur.role)
     } catch (error) {
       console.error("Error getting user roles:", error)
+      await AuthLogger.logError(userId, `Error getting user roles: ${error instanceof Error ? error.message : String(error)}`, 'permission_manager', { userId })
       return []
     }
   }
@@ -435,9 +457,17 @@ export class PermissionManager {
         },
       })
 
+      await AuthLogger.logEvent({
+        userId,
+        action: 'CREATE',
+        resource: 'role',
+        context: { roleName },
+        metadata: { roleName }
+      })
       return true
     } catch (error) {
       console.error("Error assigning role:", error)
+      await AuthLogger.logError(userId, `Error assigning role: ${error instanceof Error ? error.message : String(error)}`, 'permission_manager', { userId, roleName })
       return false
     }
   }
@@ -459,9 +489,17 @@ export class PermissionManager {
         },
       })
 
+      await AuthLogger.logEvent({
+        userId,
+        action: 'DELETE',
+        resource: 'role',
+        context: { roleName },
+        metadata: { roleName }
+      })
       return true
     } catch (error) {
       console.error("Error removing role:", error)
+      await AuthLogger.logError(userId, `Error removing role: ${error instanceof Error ? error.message : String(error)}`, 'permission_manager', { userId, roleName })
       return false
     }
   }
@@ -472,6 +510,7 @@ export class PermissionManager {
       return roles.some(role => role.name === roleName)
     } catch (error) {
       console.error("Error checking role:", error)
+      await AuthLogger.logError(userId, `Error checking role: ${error instanceof Error ? error.message : String(error)}`, 'permission_manager', { userId, roleName })
       return false
     }
   }
@@ -482,6 +521,7 @@ export class PermissionManager {
       return roles.some(role => roleNames.includes(role.name))
     } catch (error) {
       console.error("Error checking roles:", error)
+      await AuthLogger.logError(userId, `Error checking any role: ${error instanceof Error ? error.message : String(error)}`, 'permission_manager', { userId, roleNames })
       return false
     }
   }
@@ -492,6 +532,7 @@ export class PermissionManager {
       return roleNames.every(roleName => roles.some(role => role.name === roleName))
     } catch (error) {
       console.error("Error checking roles:", error)
+      await AuthLogger.logError(userId, `Error checking all roles: ${error instanceof Error ? error.message : String(error)}`, 'permission_manager', { userId, roleNames })
       return false
     }
   }
@@ -586,7 +627,7 @@ export class PermissionManager {
   static async getCurrentUserId(): Promise<string | null> {
     try {
       const session = await getServerSession(authOptions)
-      return session?.user?.id || null
+      return (session?.user as any)?.id || null
     } catch (error) {
       console.error("Error getting current user ID:", error)
       return null

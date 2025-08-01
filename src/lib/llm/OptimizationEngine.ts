@@ -1,46 +1,248 @@
 import { v4 as uuidv4 } from 'uuid'
-import { ICostEstimator, CostEstimationRequest, CostEstimationResult, ModelPricing } from './CostEstimator'
-import { IBudgetManager, Budget, BudgetUtilization } from './BudgetManager'
-
-export interface ModelCapabilities {
-  maxTokens: number
-  streaming: boolean
-  chat: boolean
-  completion: boolean
-  embeddings: boolean
-  vision: boolean
-  functionCalling: boolean
-  jsonMode: boolean
-  contextWindow: number
-  supportedLanguages: string[]
-  specialFeatures: string[]
-}
+import { CostEstimator, CostEstimatorConfig, CostEstimationRequest, CostEstimationResult, ModelComparisonRequest, ModelComparisonResult, OptimizationRequest as CostEstimationRequestType, OptimizationResult as CostEstimationResultType } from './CostEstimator'
+import { BudgetManager, BudgetManagerConfig, Budget, Expense, BudgetStatus, SpendingForecast, SpendingBreakdown } from './BudgetManager'
 
 export interface IOptimizationEngine {
   initialize(config: OptimizationEngineConfig): Promise<void>
-  optimizeRequest(request: CostEstimationRequest): Promise<OptimizationResult>
-  optimizeBatch(requests: CostEstimationRequest[]): Promise<BatchOptimizationResult>
-  optimizeModelSelection(requests: CostEstimationRequest[]): Promise<ModelSelectionOptimization>
-  optimizeTokenUsage(requests: CostEstimationRequest[]): Promise<TokenOptimizationResult>
-  optimizeBudgetAllocation(budgets: Budget[]): Promise<BudgetOptimizationResult>
+  optimizeRequest(request: OptimizationRequest): Promise<OptimizationResult>
+  optimizeWorkflow(workflow: WorkflowOptimizationRequest): Promise<WorkflowOptimizationResult>
+  optimizeSystem(systemOptimizationRequest: SystemOptimizationRequest): Promise<SystemOptimizationResult>
   getOptimizationInsights(timeRange?: TimeRange): Promise<OptimizationInsight[]>
   getOptimizationRecommendations(): Promise<OptimizationRecommendation[]>
-  applyOptimization(optimizationId: string): Promise<OptimizationApplicationResult>
+  applyOptimization(optimizationId: string): Promise<OptimizationResult>
   getOptimizationHistory(): Promise<OptimizationRecord[]>
-  setOptimizationRule(rule: OptimizationRule): Promise<void>
-  removeOptimizationRule(ruleId: string): Promise<void>
-  getOptimizationRules(): Promise<OptimizationRule[]>
+  benchmarkPerformance(benchmarkRequest: BenchmarkRequest): Promise<BenchmarkResult>
 }
 
 export interface OptimizationEngineConfig {
+  costEstimatorConfig?: CostEstimatorConfig
+  budgetManagerConfig?: BudgetManagerConfig
   enableAutoOptimization?: boolean
-  enableModelSelection?: boolean
-  enableTokenOptimization?: boolean
-  enableBudgetOptimization?: boolean
-  optimizationInterval?: number
-  confidenceThreshold?: number
-  savingsThreshold?: number
-  maxOptimizationImpact?: number
+  optimizationStrategies?: OptimizationStrategy[]
+  performanceThresholds?: PerformanceThresholds
+  costThresholds?: CostThresholds
+}
+
+export interface OptimizationStrategy {
+  id: string
+  name: string
+  description: string
+  type: 'model_selection' | 'prompt_optimization' | 'caching' | 'batching' | 'routing'
+  enabled: boolean
+  priority: number
+  conditions: OptimizationCondition[]
+  actions: OptimizationAction[]
+}
+
+export interface OptimizationCondition {
+  type: 'cost' | 'performance' | 'quality' | 'reliability'
+  operator: 'greater_than' | 'less_than' | 'equals' | 'between'
+  value: number | number[]
+  metric: string
+}
+
+export interface OptimizationAction {
+  type: 'switch_model' | 'modify_prompt' | 'enable_cache' | 'batch_requests' | 'change_provider'
+  parameters: Record<string, any>
+}
+
+export interface PerformanceThresholds {
+  maxLatency: number
+  minAccuracy: number
+  maxErrorRate: number
+  minThroughput: number
+}
+
+export interface CostThresholds {
+  maxCostPerRequest: number
+  maxCostPerToken: number
+  maxDailyCost: number
+  costEfficiencyTarget: number
+}
+
+export interface OptimizationRequest {
+  requestType: 'completion' | 'chat' | 'embedding'
+  inputTokens: number
+  outputTokens?: number
+  requirements: OptimizationRequirements
+  constraints?: OptimizationConstraints
+  context?: any
+}
+
+export interface OptimizationRequirements {
+  quality?: 'low' | 'medium' | 'high' | 'critical'
+  speed?: 'low' | 'medium' | 'high' | 'critical'
+  cost?: 'low' | 'medium' | 'high' | 'critical'
+  capabilities?: string[]
+}
+
+export interface OptimizationConstraints {
+  maxCost?: number
+  maxLatency?: number
+  preferredProviders?: string[]
+  excludedModels?: string[]
+  maxRetries?: number
+}
+
+export interface OptimizationResult {
+  id: string
+  requestId: string
+  success: boolean
+  recommendedProvider: string
+  recommendedModel: string
+  estimatedCost: number
+  estimatedSavings: number
+  confidence: number
+  reasoning: string[]
+  alternatives: AlternativeModel[]
+  applied: boolean
+  timestamp: Date
+  metadata?: any
+}
+
+export interface AlternativeModel {
+  providerId: string
+  modelId: string
+  estimatedCost: number
+  estimatedSavings: number
+  tradeoffs: string[]
+}
+
+export interface WorkflowOptimizationRequest {
+  workflowId: string
+  steps: WorkflowStep[]
+  constraints?: WorkflowConstraints
+  objectives?: WorkflowObjectives
+}
+
+export interface WorkflowStep {
+  id: string
+  type: 'llm_call' | 'data_processing' | 'api_call' | 'condition' | 'loop'
+  provider?: string
+  model?: string
+  inputTokens?: number
+  outputTokens?: number
+  dependencies?: string[]
+}
+
+export interface WorkflowConstraints {
+  maxTotalCost?: number
+  maxExecutionTime?: number
+  preferredProviders?: string[]
+  excludedModels?: string[]
+}
+
+export interface WorkflowObjectives {
+  minimizeCost?: boolean
+  minimizeTime?: boolean
+  maximizeQuality?: boolean
+  balanceFactors?: {
+    cost: number
+    time: number
+    quality: number
+  }
+}
+
+export interface WorkflowOptimizationResult {
+  workflowId: string
+  success: boolean
+  optimizedSteps: OptimizedWorkflowStep[]
+  estimatedTotalCost: number
+  estimatedTotalTime: number
+  estimatedSavings: number
+  confidence: number
+  recommendations: string[]
+  timestamp: Date
+}
+
+export interface OptimizedWorkflowStep {
+  id: string
+  originalProvider?: string
+  originalModel?: string
+  recommendedProvider?: string
+  recommendedModel?: string
+  estimatedCost: number
+  estimatedTime: number
+  savings: number
+  reasoning: string[]
+}
+
+export interface SystemOptimizationRequest {
+  timeRange: TimeRange
+  focusAreas: OptimizationFocusArea[]
+  constraints?: SystemOptimizationConstraints
+}
+
+export interface OptimizationFocusArea {
+  type: 'cost' | 'performance' | 'quality' | 'reliability'
+  priority: 'low' | 'medium' | 'high'
+  target?: number
+}
+
+export interface SystemOptimizationConstraints {
+  maxBudgetImpact?: number
+  minServiceLevel?: number
+  allowedDowntime?: number
+  changeWindow?: TimeRange
+}
+
+export interface SystemOptimizationResult {
+  success: boolean
+  optimizations: SystemOptimization[]
+  estimatedTotalSavings: number
+  estimatedPerformanceImprovement: number
+  implementationPlan: ImplementationPlan
+  risks: RiskAssessment[]
+  timestamp: Date
+}
+
+export interface SystemOptimization {
+  id: string
+  type: 'model_migration' | 'infrastructure_change' | 'configuration_update' | 'workflow_redesign'
+  description: string
+  estimatedSavings: number
+  estimatedImprovement: number
+  complexity: 'low' | 'medium' | 'high'
+  impact: 'low' | 'medium' | 'high'
+  steps: ImplementationStep[]
+}
+
+export interface ImplementationPlan {
+  phases: ImplementationPhase[]
+  totalDuration: number
+  resourceRequirements: ResourceRequirement[]
+}
+
+export interface ImplementationPhase {
+  id: string
+  name: string
+  duration: number
+  steps: ImplementationStep[]
+  dependencies?: string[]
+}
+
+export interface ImplementationStep {
+  id: string
+  description: string
+  type: 'configuration' | 'deployment' | 'testing' | 'monitoring'
+  duration: number
+  resources: string[]
+  risks: string[]
+}
+
+export interface ResourceRequirement {
+  type: 'personnel' | 'compute' | 'storage' | 'network'
+  quantity: number
+  unit: string
+  duration: number
+}
+
+export interface RiskAssessment {
+  type: 'technical' | 'operational' | 'financial' | 'compliance'
+  description: string
+  likelihood: 'low' | 'medium' | 'high'
+  impact: 'low' | 'medium' | 'high'
+  mitigation: string[]
 }
 
 export interface TimeRange {
@@ -48,243 +250,134 @@ export interface TimeRange {
   end: Date
 }
 
-export interface OptimizationResult {
-  id: string
-  originalRequest: CostEstimationRequest
-  optimizedRequest: CostEstimationRequest
-  originalCost: number
-  optimizedCost: number
-  savings: number
-  savingsPercentage: number
-  confidence: number
-  optimizations: OptimizationStep[]
-  impact: OptimizationImpact
-  timestamp: Date
-}
-
-export interface OptimizationStep {
-  type: 'model_switch' | 'token_reduction' | 'prompt_optimization' | 'batching' | 'caching'
-  description: string
-  impact: number
-  confidence: number
-  implementation: string
-  metadata?: any
-}
-
-export interface OptimizationImpact {
-  costReduction: number
-  performanceChange: number
-  qualityChange: number
-  reliabilityChange: number
-}
-
-export interface BatchOptimizationResult {
-  id: string
-  originalRequests: CostEstimationRequest[]
-  optimizedRequests: CostEstimationRequest[]
-  originalTotalCost: number
-  optimizedTotalCost: number
-  totalSavings: number
-  savingsPercentage: number
-  optimizations: BatchOptimizationStep[]
-  timestamp: Date
-}
-
-export interface BatchOptimizationStep {
-  type: 'batch_processing' | 'model_standardization' | 'request_grouping' | 'parallel_processing'
-  description: string
-  affectedRequests: string[]
-  savings: number
-  confidence: number
-  implementation: string
-}
-
-export interface ModelSelectionOptimization {
-  id: string
-  requests: CostEstimationRequest[]
-  modelAssignments: ModelAssignment[]
-  originalCost: number
-  optimizedCost: number
-  savings: number
-  savingsPercentage: number
-  confidence: number
-  timestamp: Date
-}
-
-export interface ModelAssignment {
-  requestId: string
-  originalModel: string
-  recommendedModel: string
-  reason: string
-  expectedSavings: number
-  confidence: number
-}
-
-export interface TokenOptimizationResult {
-  id: string
-  requests: CostEstimationRequest[]
-  tokenOptimizations: TokenOptimization[]
-  originalTotalTokens: number
-  optimizedTotalTokens: number
-  tokenReduction: number
-  reductionPercentage: number
-  estimatedCostSavings: number
-  timestamp: Date
-}
-
-export interface TokenOptimization {
-  requestId: string
-  type: 'prompt_compression' | 'context_optimization' | 'response_caching' | 'output_truncation'
-  description: string
-  originalTokens: number
-  optimizedTokens: number
-  tokenReduction: number
-  estimatedSavings: number
-  confidence: number
-}
-
-export interface BudgetOptimizationResult {
-  id: string
-  originalBudgets: Budget[]
-  optimizedBudgets: Budget[]
-  totalReallocation: number
-  optimizationSteps: BudgetOptimizationStep[]
-  expectedEfficiencyImprovement: number
-  timestamp: Date
-}
-
-export interface BudgetOptimizationStep {
-  type: 'budget_increase' | 'budget_decrease' | 'category_reallocation' | 'period_adjustment'
-  budgetId: string
-  description: string
-  amount: number
-  reason: string
-  expectedImpact: number
-}
-
 export interface OptimizationInsight {
   id: string
-  type: 'cost_pattern' | 'usage_anomaly' | 'efficiency_opportunity' | 'budget_mismatch'
+  type: 'cost_opportunity' | 'performance_bottleneck' | 'quality_issue' | 'efficiency_gain'
   title: string
   description: string
-  severity: 'low' | 'medium' | 'high'
-  data: any
+  impact: 'low' | 'medium' | 'high'
+  confidence: number
+  actionable: boolean
+  data?: any
   timestamp: Date
-  recommendations: string[]
 }
 
 export interface OptimizationRecommendation {
   id: string
-  type: 'model_selection' | 'token_optimization' | 'budget_adjustment' | 'scheduling' | 'caching'
+  type: 'model_switch' | 'prompt_optimization' | 'caching_strategy' | 'batching' | 'routing_change'
   title: string
   description: string
+  estimatedImpact: {
+    cost: number
+    performance: number
+    quality: number
+  }
+  complexity: 'low' | 'medium' | 'high'
   priority: 'low' | 'medium' | 'high'
-  estimatedSavings: number
-  implementationDifficulty: 'low' | 'medium' | 'high'
-  estimatedImpact: OptimizationImpact
-  steps: string[]
-  prerequisites: string[]
-  risks: string[]
-  timestamp: Date
-}
-
-export interface OptimizationApplicationResult {
-  id: string
-  optimizationId: string
-  success: boolean
-  appliedSteps: string[]
-  failedSteps: string[]
-  actualSavings: number
-  actualImpact: OptimizationImpact
-  errors: string[]
-  warnings: string[]
+  implementation: string[]
   timestamp: Date
 }
 
 export interface OptimizationRecord {
   id: string
-  type: string
-  description: string
-  originalState: any
-  optimizedState: any
-  savings: number
-  impact: OptimizationImpact
+  type: 'request' | 'workflow' | 'system'
+  requestId?: string
+  workflowId?: string
   success: boolean
+  applied: boolean
+  result: OptimizationResult | WorkflowOptimizationResult | SystemOptimizationResult
   timestamp: Date
-  appliedBy: string
 }
 
-export interface OptimizationRule {
+export interface BenchmarkRequest {
+  models: BenchmarkModel[]
+  testCases: TestCase[]
+  metrics: BenchmarkMetric[]
+}
+
+export interface BenchmarkModel {
+  providerId: string
+  modelId: string
+  parameters?: Record<string, any>
+}
+
+export interface TestCase {
   id: string
+  input: string
+  expectedOutput?: string
+  category: string
+  difficulty: 'easy' | 'medium' | 'hard'
+}
+
+export interface BenchmarkMetric {
   name: string
-  description: string
-  type: 'model_selection' | 'token_optimization' | 'budget_optimization' | 'scheduling'
-  condition: OptimizationCondition
-  action: OptimizationAction
-  priority: number
-  enabled: boolean
-  autoApply: boolean
-  createdAt: Date
-  lastModified: Date
-  lastApplied?: Date
-  applicationCount: number
-  totalSavings: number
+  type: 'latency' | 'accuracy' | 'cost' | 'throughput' | 'quality'
+  weight: number
 }
 
-export interface OptimizationCondition {
-  model?: string
-  requestType?: string
-  minTokens?: number
-  maxTokens?: number
-  minCost?: number
-  maxCost?: number
-  timeRange?: TimeRange
-  customCondition?: (request: CostEstimationRequest) => Promise<boolean>
+export interface BenchmarkResult {
+  id: string
+  timestamp: Date
+  results: ModelBenchmarkResult[]
+  summary: BenchmarkSummary
+  recommendations: string[]
 }
 
-export interface OptimizationAction {
-  type: 'switch_model' | 'reduce_tokens' | 'adjust_budget' | 'schedule_request'
-  target: string
-  parameters: any
-  description: string
+export interface ModelBenchmarkResult {
+  providerId: string
+  modelId: string
+  metrics: Record<string, number>
+  score: number
+  rank: number
+  strengths: string[]
+  weaknesses: string[]
+}
+
+export interface BenchmarkSummary {
+  bestOverallModel: string
+  bestCostEfficientModel: string
+  bestPerformanceModel: string
+  keyFindings: string[]
 }
 
 export class OptimizationEngine implements IOptimizationEngine {
   private config!: OptimizationEngineConfig
-  private costEstimator?: ICostEstimator
-  private budgetManager?: IBudgetManager
-  private optimizationRules: Map<string, OptimizationRule> = new Map()
+  private costEstimator!: CostEstimator
+  private budgetManager!: BudgetManager
+  private optimizationStrategies: OptimizationStrategy[] = []
   private optimizationHistory: OptimizationRecord[] = []
-  private modelCapabilities: Map<string, ModelCapabilities> = new Map()
   private initialized = false
-  private optimizationInterval?: NodeJS.Timeout
-
-  constructor(costEstimator?: ICostEstimator, budgetManager?: IBudgetManager) {
-    this.costEstimator = costEstimator
-    this.budgetManager = budgetManager
-  }
 
   async initialize(config: OptimizationEngineConfig): Promise<void> {
     try {
       this.config = {
-        enableAutoOptimization: true,
-        enableModelSelection: true,
-        enableTokenOptimization: true,
-        enableBudgetOptimization: true,
-        optimizationInterval: 300000, // 5 minutes
-        confidenceThreshold: 0.7,
-        savingsThreshold: 0.05, // 5% savings threshold
-        maxOptimizationImpact: 0.3, // Maximum 30% impact on any metric
+        enableAutoOptimization: false,
+        optimizationStrategies: this.getDefaultOptimizationStrategies(),
+        performanceThresholds: {
+          maxLatency: 5000,
+          minAccuracy: 0.8,
+          maxErrorRate: 0.05,
+          minThroughput: 10
+        },
+        costThresholds: {
+          maxCostPerRequest: 0.1,
+          maxCostPerToken: 0.002,
+          maxDailyCost: 1000,
+          costEfficiencyTarget: 0.8
+        },
         ...config
       }
 
-      // Initialize model capabilities
-      await this.initializeModelCapabilities()
+      // Initialize cost estimator
+      this.costEstimator = new CostEstimator()
+      await this.costEstimator.initialize(this.config.costEstimatorConfig || {})
 
-      // Start auto-optimization if enabled
-      if (this.config.enableAutoOptimization) {
-        this.startAutoOptimization()
-      }
+      // Initialize budget manager
+      this.budgetManager = new BudgetManager()
+      await this.budgetManager.initialize(this.config.budgetManagerConfig || {})
+
+      // Set optimization strategies
+      this.optimizationStrategies = this.config.optimizationStrategies || this.getDefaultOptimizationStrategies()
 
       this.initialized = true
       console.log('Optimization engine initialized successfully')
@@ -294,439 +387,209 @@ export class OptimizationEngine implements IOptimizationEngine {
     }
   }
 
-  async optimizeRequest(request: CostEstimationRequest): Promise<OptimizationResult> {
+  async optimizeRequest(request: OptimizationRequest): Promise<OptimizationResult> {
     if (!this.initialized) {
       throw new Error('Optimization engine not initialized')
     }
 
     try {
-      // Get original cost
-      const originalCost = this.costEstimator 
-        ? (await this.costEstimator.estimateCost(request)).totalCost
-        : this.estimateSimpleCost(request)
-
-      const optimizations: OptimizationStep[] = []
-      let optimizedRequest = { ...request }
-      let totalSavings = 0
-      let totalImpact: OptimizationImpact = {
-        costReduction: 0,
-        performanceChange: 0,
-        qualityChange: 0,
-        reliabilityChange: 0
-      }
-
-      // Apply optimization rules
-      for (const rule of this.optimizationRules.values()) {
-        if (!rule.enabled) continue
-
-        if (await this.matchesOptimizationCondition(rule.condition, request)) {
-          const optimizationResult = await this.applyOptimizationRule(rule, request)
-          if (optimizationResult.savings > 0) {
-            optimizations.push(optimizationResult.step)
-            optimizedRequest = optimizationResult.request
-            totalSavings += optimizationResult.savings
-            totalImpact = this.combineOptimizationImpacts(totalImpact, optimizationResult.impact)
-          }
-        }
-      }
-
-      // Model selection optimization
-      if (this.config.enableModelSelection) {
-        const modelOptimization = await this.optimizeModelForRequest(optimizedRequest)
-        if (modelOptimization.savings > 0) {
-          optimizations.push(modelOptimization.step)
-          optimizedRequest.model = modelOptimization.recommendedModel
-          totalSavings += modelOptimization.savings
-          totalImpact = this.combineOptimizationImpacts(totalImpact, modelOptimization.impact)
-        }
-      }
-
-      // Token optimization
-      if (this.config.enableTokenOptimization) {
-        const tokenOptimization = await this.optimizeTokensForRequest(optimizedRequest)
-        if (tokenOptimization.savings > 0) {
-          optimizations.push(tokenOptimization.step)
-          optimizedRequest.inputTokens = tokenOptimization.optimizedInputTokens
-          if (tokenOptimization.optimizedOutputTokens) {
-            optimizedRequest.outputTokens = tokenOptimization.optimizedOutputTokens
-          }
-          totalSavings += tokenOptimization.savings
-          totalImpact = this.combineOptimizationImpacts(totalImpact, tokenOptimization.impact)
-        }
-      }
-
-      // Calculate optimized cost
-      const optimizedCost = this.costEstimator
-        ? (await this.costEstimator.estimateCost(optimizedRequest)).totalCost
-        : this.estimateSimpleCost(optimizedRequest)
-
-      // Calculate confidence
-      const confidence = this.calculateConfidence(optimizations)
-
-      return {
+      const optimizationId = uuidv4()
+      
+      // Get optimal model from cost estimator
+      const costOptimization = await this.costEstimator.getOptimalModel(request)
+      
+      // Convert cost estimator result to optimization engine result format
+      const convertedResult: OptimizationResult = {
         id: uuidv4(),
-        originalRequest: request,
-        optimizedRequest,
-        originalCost,
-        optimizedCost,
-        savings: originalCost - optimizedCost,
-        savingsPercentage: originalCost > 0 ? ((originalCost - optimizedCost) / originalCost) * 100 : 0,
-        confidence,
-        optimizations,
-        impact: totalImpact,
-        timestamp: new Date()
+        requestId: uuidv4(),
+        success: true,
+        recommendedProvider: costOptimization.recommendedProvider,
+        recommendedModel: costOptimization.recommendedModel,
+        estimatedCost: costOptimization.estimatedCost,
+        estimatedSavings: costOptimization.estimatedSavings,
+        confidence: costOptimization.confidence,
+        reasoning: costOptimization.reasoning,
+        alternatives: costOptimization.alternatives.map(alt => ({
+          providerId: alt.providerId,
+          modelId: alt.modelId,
+          estimatedCost: alt.estimatedCost,
+          estimatedSavings: 0, // Default value since CostEstimator doesn't provide this
+          tradeoffs: alt.tradeoffs || []
+        })),
+        applied: false,
+        timestamp: new Date(),
+        metadata: {
+          originalRequest: request,
+          strategiesApplied: []
+        }
       }
+      
+      // Apply additional optimization strategies
+      const enhancedResult = await this.applyOptimizationStrategies(request, convertedResult)
+      
+      const result: OptimizationResult = {
+        id: optimizationId,
+        requestId: uuidv4(),
+        success: true,
+        recommendedProvider: enhancedResult.recommendedProvider,
+        recommendedModel: enhancedResult.recommendedModel,
+        estimatedCost: enhancedResult.estimatedCost,
+        estimatedSavings: enhancedResult.estimatedSavings,
+        confidence: enhancedResult.confidence,
+        reasoning: enhancedResult.reasoning,
+        alternatives: enhancedResult.alternatives,
+        applied: false,
+        timestamp: new Date(),
+        metadata: {
+          originalRequest: request,
+          strategiesApplied: this.optimizationStrategies.filter(s => s.enabled).map(s => s.id)
+        }
+      }
+
+      // Record optimization
+      this.recordOptimization('request', result)
+
+      return result
     } catch (error) {
       console.error('Failed to optimize request:', error)
       throw error
     }
   }
 
-  async optimizeBatch(requests: CostEstimationRequest[]): Promise<BatchOptimizationResult> {
+  async optimizeWorkflow(workflow: WorkflowOptimizationRequest): Promise<WorkflowOptimizationResult> {
     if (!this.initialized) {
       throw new Error('Optimization engine not initialized')
     }
 
     try {
-      // Get original total cost
-      const originalCosts = await Promise.all(
-        requests.map(request => 
-          this.costEstimator 
-            ? this.costEstimator!.estimateCost(request)
-            : Promise.resolve({ totalCost: this.estimateSimpleCost(request) })
-        )
-      )
-      const originalTotalCost = originalCosts.reduce((sum, cost) => sum + cost.totalCost, 0)
+      const optimizedSteps: OptimizedWorkflowStep[] = []
+      let totalEstimatedCost = 0
+      let totalEstimatedTime = 0
+      let totalEstimatedSavings = 0
 
-      const optimizations: BatchOptimizationStep[] = []
-      let optimizedRequests = [...requests]
+      // Optimize each step
+      for (const step of workflow.steps) {
+        if (step.type === 'llm_call' && step.inputTokens) {
+          const optimizationRequest: OptimizationRequest = {
+            requestType: 'completion',
+            inputTokens: step.inputTokens,
+            outputTokens: step.outputTokens,
+            requirements: workflow.objectives ? {
+              quality: workflow.objectives.maximizeQuality ? 'high' : 'medium',
+              speed: workflow.objectives.minimizeTime ? 'high' : 'medium',
+              cost: workflow.objectives.minimizeCost ? 'high' : 'medium'
+            } : {},
+            constraints: workflow.constraints ? {
+              maxCost: workflow.constraints.maxTotalCost,
+              preferredProviders: workflow.constraints.preferredProviders,
+              excludedModels: workflow.constraints.excludedModels
+            } : {}
+          }
+
+          const stepOptimization = await this.optimizeRequest(optimizationRequest)
+
+          const optimizedStep: OptimizedWorkflowStep = {
+            id: step.id,
+            originalProvider: step.provider,
+            originalModel: step.model,
+            recommendedProvider: stepOptimization.recommendedProvider,
+            recommendedModel: stepOptimization.recommendedModel,
+            estimatedCost: stepOptimization.estimatedCost,
+            estimatedTime: this.estimateStepTime(step, stepOptimization),
+            savings: stepOptimization.estimatedSavings,
+            reasoning: stepOptimization.reasoning
+          }
+
+          optimizedSteps.push(optimizedStep)
+          totalEstimatedCost += stepOptimization.estimatedCost
+          totalEstimatedTime += optimizedStep.estimatedTime
+          totalEstimatedSavings += stepOptimization.estimatedSavings
+        } else {
+          // For non-LLM steps, use original configuration
+          optimizedSteps.push({
+            id: step.id,
+            originalProvider: step.provider,
+            originalModel: step.model,
+            recommendedProvider: step.provider,
+            recommendedModel: step.model,
+            estimatedCost: 0,
+            estimatedTime: this.estimateStepTime(step),
+            savings: 0,
+            reasoning: ['Non-LLM step, no optimization applied']
+          })
+        }
+      }
+
+      const result: WorkflowOptimizationResult = {
+        workflowId: workflow.workflowId,
+        success: true,
+        optimizedSteps,
+        estimatedTotalCost: totalEstimatedCost,
+        estimatedTotalTime: totalEstimatedTime,
+        estimatedSavings: totalEstimatedSavings,
+        confidence: this.calculateWorkflowConfidence(optimizedSteps),
+        recommendations: this.generateWorkflowRecommendations(optimizedSteps, workflow),
+        timestamp: new Date()
+      }
+
+      // Record optimization
+      this.recordOptimization('workflow', result)
+
+      return result
+    } catch (error) {
+      console.error('Failed to optimize workflow:', error)
+      throw error
+    }
+  }
+
+  async optimizeSystem(systemOptimizationRequest: SystemOptimizationRequest): Promise<SystemOptimizationResult> {
+    if (!this.initialized) {
+      throw new Error('Optimization engine not initialized')
+    }
+
+    try {
+      const optimizations: SystemOptimization[] = []
       let totalSavings = 0
+      let totalImprovement = 0
 
-      // Batch processing optimization
-      if (requests.length > 5) {
-        const batchOptimization = await this.optimizeBatchProcessing(optimizedRequests)
-        if (batchOptimization.savings > 0) {
-          optimizations.push(batchOptimization.step)
-          totalSavings += batchOptimization.savings
-        }
+      // Get current system performance and cost data
+      const budgetStatus = await this.budgetManager.getBudgetStatus()
+      const spendingBreakdown = await this.budgetManager.getSpendingBreakdown(systemOptimizationRequest.timeRange)
+
+      // Analyze each focus area
+      for (const focusArea of systemOptimizationRequest.focusAreas) {
+        const areaOptimizations = await this.analyzeOptimizationArea(focusArea, budgetStatus, spendingBreakdown)
+        optimizations.push(...areaOptimizations)
       }
 
-      // Model standardization optimization
-      if (this.config.enableModelSelection) {
-        const modelStandardization = await this.standardizeModels(optimizedRequests)
-        if (modelStandardization.savings > 0) {
-          optimizations.push(modelStandardization.step)
-          optimizedRequests = modelStandardization.requests
-          totalSavings += modelStandardization.savings
-        }
+      // Calculate totals
+      for (const optimization of optimizations) {
+        totalSavings += optimization.estimatedSavings
+        totalImprovement += optimization.estimatedImprovement
       }
 
-      // Request grouping optimization
-      const requestGrouping = await this.groupSimilarRequests(optimizedRequests)
-      if (requestGrouping.savings > 0) {
-        optimizations.push(requestGrouping.step)
-        optimizedRequests = requestGrouping.requests
-        totalSavings += requestGrouping.savings
-      }
+      // Generate implementation plan
+      const implementationPlan = this.generateImplementationPlan(optimizations)
 
-      // Calculate optimized total cost
-      const optimizedCosts = await Promise.all(
-        optimizedRequests.map(request => 
-          this.costEstimator 
-            ? this.costEstimator!.estimateCost(request)
-            : Promise.resolve({ totalCost: this.estimateSimpleCost(request) })
-        )
-      )
-      const optimizedTotalCost = optimizedCosts.reduce((sum, cost) => sum + cost.totalCost, 0)
+      // Assess risks
+      const risks = this.assessOptimizationRisks(optimizations)
 
-      return {
-        id: uuidv4(),
-        originalRequests: requests,
-        optimizedRequests,
-        originalTotalCost,
-        optimizedTotalCost,
-        totalSavings: originalTotalCost - optimizedTotalCost,
-        savingsPercentage: originalTotalCost > 0 ? ((originalTotalCost - optimizedTotalCost) / originalTotalCost) * 100 : 0,
+      const result: SystemOptimizationResult = {
+        success: true,
         optimizations,
+        estimatedTotalSavings: totalSavings,
+        estimatedPerformanceImprovement: totalImprovement,
+        implementationPlan,
+        risks,
         timestamp: new Date()
       }
+
+      // Record optimization
+      this.recordOptimization('system', result)
+
+      return result
     } catch (error) {
-      console.error('Failed to optimize batch:', error)
-      throw error
-    }
-  }
-
-  async optimizeModelSelection(requests: CostEstimationRequest[]): Promise<ModelSelectionOptimization> {
-    if (!this.initialized || !this.config.enableModelSelection) {
-      throw new Error('Model selection optimization not enabled')
-    }
-
-    try {
-      const modelAssignments: ModelAssignment[] = []
-      let totalSavings = 0
-
-      // Get original costs
-      const originalCosts = await Promise.all(
-        requests.map(request => 
-          this.costEstimator 
-            ? this.costEstimator!.estimateCost(request)
-            : Promise.resolve({ totalCost: this.estimateSimpleCost(request) })
-        )
-      )
-      const originalTotalCost = originalCosts.reduce((sum, cost) => sum + cost.totalCost, 0)
-
-      // Analyze each request
-      for (let i = 0; i < requests.length; i++) {
-        const request = requests[i]
-        const originalCost = originalCosts[i].totalCost
-
-        // Find optimal model for this request
-        const optimalModel = await this.findOptimalModel(request)
-        
-        if (optimalModel.model !== request.model && optimalModel.savings > 0) {
-          const optimizedRequest = { ...request, model: optimalModel.model }
-          const optimizedCost = this.costEstimator
-            ? (await this.costEstimator!.estimateCost(optimizedRequest)).totalCost
-            : this.estimateSimpleCost(optimizedRequest)
-
-          modelAssignments.push({
-            requestId: request.agentId,
-            originalModel: request.model,
-            recommendedModel: optimalModel.model,
-            reason: optimalModel.reason,
-            expectedSavings: originalCost - optimizedCost,
-            confidence: optimalModel.confidence
-          })
-
-          totalSavings += originalCost - optimizedCost
-        }
-      }
-
-      // Calculate optimized total cost
-      const optimizedTotalCost = originalTotalCost - totalSavings
-
-      return {
-        id: uuidv4(),
-        requests,
-        modelAssignments,
-        originalCost: originalTotalCost,
-        optimizedCost: optimizedTotalCost,
-        savings: totalSavings,
-        savingsPercentage: originalTotalCost > 0 ? (totalSavings / originalTotalCost) * 100 : 0,
-        confidence: this.calculateModelConfidence(modelAssignments),
-        timestamp: new Date()
-      }
-    } catch (error) {
-      console.error('Failed to optimize model selection:', error)
-      throw error
-    }
-  }
-
-  async optimizeTokenUsage(requests: CostEstimationRequest[]): Promise<TokenOptimizationResult> {
-    if (!this.initialized || !this.config.enableTokenOptimization) {
-      throw new Error('Token optimization not enabled')
-    }
-
-    try {
-      const tokenOptimizations: TokenOptimization[] = []
-      let totalTokenReduction = 0
-      let estimatedCostSavings = 0
-
-      const originalTotalTokens = requests.reduce((sum, request) => 
-        sum + request.inputTokens + (request.outputTokens || 0), 0)
-
-      // Analyze each request
-      for (const request of requests) {
-        const originalTokens = request.inputTokens + (request.outputTokens || 0)
-        
-        // Prompt compression optimization
-        if (request.inputTokens > 1000) {
-          const compressionRatio = 0.85 // 15% compression
-          const optimizedInputTokens = Math.floor(request.inputTokens * compressionRatio)
-          const tokenReduction = request.inputTokens - optimizedInputTokens
-          
-          if (tokenReduction > 50) { // Only if significant reduction
-            const estimatedSavings = this.estimateTokenSavings(request.model, tokenReduction, 0)
-            
-            tokenOptimizations.push({
-              requestId: request.agentId,
-              type: 'prompt_compression',
-              description: 'Compress prompt to reduce token count',
-              originalTokens: request.inputTokens,
-              optimizedTokens: optimizedInputTokens,
-              tokenReduction,
-              estimatedSavings,
-              confidence: 0.8
-            })
-
-            totalTokenReduction += tokenReduction
-            estimatedCostSavings += estimatedSavings
-          }
-        }
-
-        // Context optimization
-        if (request.inputTokens > 2000) {
-          const contextReduction = Math.floor(request.inputTokens * 0.1) // 10% reduction
-          const optimizedInputTokens = request.inputTokens - contextReduction
-          
-          const estimatedSavings = this.estimateTokenSavings(request.model, contextReduction, 0)
-          
-          tokenOptimizations.push({
-            requestId: request.agentId,
-            type: 'context_optimization',
-            description: 'Optimize context window to reduce token count',
-            originalTokens: request.inputTokens,
-            optimizedTokens: optimizedInputTokens,
-            tokenReduction: contextReduction,
-            estimatedSavings,
-            confidence: 0.7
-          })
-
-          totalTokenReduction += contextReduction
-          estimatedCostSavings += estimatedSavings
-        }
-
-        // Output truncation for long responses
-        if (request.outputTokens && request.outputTokens > 1000) {
-          const outputReduction = Math.floor(request.outputTokens * 0.05) // 5% reduction
-          const optimizedOutputTokens = request.outputTokens - outputReduction
-          
-          const estimatedSavings = this.estimateTokenSavings(request.model, 0, outputReduction)
-          
-          tokenOptimizations.push({
-            requestId: request.agentId,
-            type: 'output_truncation',
-            description: 'Truncate output to reduce token count',
-            originalTokens: request.outputTokens,
-            optimizedTokens: optimizedOutputTokens,
-            tokenReduction: outputReduction,
-            estimatedSavings,
-            confidence: 0.6
-          })
-
-          totalTokenReduction += outputReduction
-          estimatedCostSavings += estimatedSavings
-        }
-      }
-
-      const optimizedTotalTokens = originalTotalTokens - totalTokenReduction
-      const reductionPercentage = originalTotalTokens > 0 ? (totalTokenReduction / originalTotalTokens) * 100 : 0
-
-      return {
-        id: uuidv4(),
-        requests,
-        tokenOptimizations,
-        originalTotalTokens,
-        optimizedTotalTokens,
-        tokenReduction: totalTokenReduction,
-        reductionPercentage,
-        estimatedCostSavings,
-        timestamp: new Date()
-      }
-    } catch (error) {
-      console.error('Failed to optimize token usage:', error)
-      throw error
-    }
-  }
-
-  async optimizeBudgetAllocation(budgets: Budget[]): Promise<BudgetOptimizationResult> {
-    if (!this.initialized || !this.config.enableBudgetOptimization) {
-      throw new Error('Budget optimization not enabled')
-    }
-
-    try {
-      const optimizationSteps: BudgetOptimizationStep[] = []
-      let totalReallocation = 0
-      let expectedEfficiencyImprovement = 0
-
-      // Analyze budget utilization
-      const budgetUtilizations = await Promise.all(
-        budgets.map(async budget => {
-          if (this.budgetManager) {
-            return await this.budgetManager.getBudgetUtilization(budget.id)
-          }
-          return this.generateMockUtilization(budget)
-        })
-      )
-
-      // Identify underutilized and overutilized budgets
-      const underutilizedBudgets = budgetUtilizations.filter(util => util.utilizationPercentage < 30)
-      const overutilizedBudgets = budgetUtilizations.filter(util => util.utilizationPercentage > 80)
-
-      // Reallocate funds from underutilized to overutilized budgets
-      for (const underutilized of underutilizedBudgets) {
-        const underutilizedBudget = budgets.find(b => b.id === underutilized.budgetId)!
-        const reallocationAmount = underutilizedBudget.totalAmount * 0.2 // Reallocate 20%
-
-        for (const overutilized of overutilizedBudgets) {
-          const overutilizedBudget = budgets.find(b => b.id === overutilized.budgetId)!
-          
-          optimizationSteps.push({
-            type: 'category_reallocation',
-            budgetId: underutilizedBudget.id,
-            description: `Reallocate funds from underutilized budget to overutilized budget`,
-            amount: -reallocationAmount,
-            reason: `Budget utilization at ${underutilized.utilizationPercentage.toFixed(1)}%`,
-            expectedImpact: 0.15
-          })
-
-          optimizationSteps.push({
-            type: 'category_reallocation',
-            budgetId: overutilizedBudget.id,
-            description: `Receive additional funds from underutilized budget`,
-            amount: reallocationAmount,
-            reason: `Budget utilization at ${overutilized.utilizationPercentage.toFixed(1)}%`,
-            expectedImpact: 0.15
-          })
-
-          totalReallocation += reallocationAmount
-          expectedEfficiencyImprovement += 0.15
-          break // Only reallocate to one overutilized budget per underutilized budget
-        }
-      }
-
-      // Adjust budgets with projected overspend
-      for (const utilization of budgetUtilizations) {
-        if (utilization.projectedOverspend) {
-          const budget = budgets.find(b => b.id === utilization.budgetId)!
-          const increaseAmount = utilization.projectedOverspend * 1.2 // 20% buffer
-
-          optimizationSteps.push({
-            type: 'budget_increase',
-            budgetId: budget.id,
-            description: `Increase budget to prevent projected overspend`,
-            amount: increaseAmount,
-            reason: `Projected overspend of $${utilization.projectedOverspend.toFixed(2)}`,
-            expectedImpact: 0.25
-          })
-
-          totalReallocation += increaseAmount
-          expectedEfficiencyImprovement += 0.25
-        }
-      }
-
-      // Create optimized budgets (in a real implementation, this would update the actual budgets)
-      const optimizedBudgets = budgets.map(budget => {
-        const budgetChanges = optimizationSteps.filter(step => step.budgetId === budget.id)
-        const totalChange = budgetChanges.reduce((sum, step) => sum + step.amount, 0)
-        
-        return {
-          ...budget,
-          totalAmount: budget.totalAmount + totalChange
-        }
-      })
-
-      return {
-        id: uuidv4(),
-        originalBudgets: budgets,
-        optimizedBudgets,
-        totalReallocation,
-        optimizationSteps,
-        expectedEfficiencyImprovement,
-        timestamp: new Date()
-      }
-    } catch (error) {
-      console.error('Failed to optimize budget allocation:', error)
+      console.error('Failed to optimize system:', error)
       throw error
     }
   }
@@ -739,75 +602,19 @@ export class OptimizationEngine implements IOptimizationEngine {
     try {
       const insights: OptimizationInsight[] = []
 
-      // In a real implementation, this would analyze actual usage data
-      // For now, we'll generate mock insights
+      // Get spending data
+      const spendingBreakdown = await this.budgetManager.getSpendingBreakdown(timeRange)
+      const budgetStatus = await this.budgetManager.getBudgetStatus()
 
-      // Cost pattern insight
-      insights.push({
-        id: uuidv4(),
-        type: 'cost_pattern',
-        title: 'Weekend Cost Spike',
-        description: 'Costs increase by 40% on weekends compared to weekdays',
-        severity: 'medium',
-        data: {
-          weekdayAverage: 75,
-          weekendAverage: 105,
-          increasePercentage: 40
-        },
-        timestamp: new Date(),
-        recommendations: [
-          'Implement weekend-specific cost controls',
-          'Consider batching non-urgent requests for weekdays',
-          'Review weekend usage patterns'
-        ]
-      })
+      // Analyze cost patterns
+      const costInsights = this.analyzeCostPatterns(spendingBreakdown, budgetStatus)
+      insights.push(...costInsights)
 
-      // Usage anomaly insight
-      insights.push({
-        id: uuidv4(),
-        type: 'usage_anomaly',
-        title: 'Unusual Model Usage',
-        description: 'GPT-4 usage increased by 200% in the last week',
-        severity: 'high',
-        data: {
-          model: 'gpt-4',
-          previousWeekUsage: 100,
-          currentWeekUsage: 300,
-          increasePercentage: 200
-        },
-        timestamp: new Date(),
-        recommendations: [
-          'Investigate cause of increased GPT-4 usage',
-          'Consider switching to GPT-3.5 for suitable tasks',
-          'Implement model usage monitoring'
-        ]
-      })
+      // Analyze optimization history
+      const historyInsights = this.analyzeOptimizationHistory()
+      insights.push(...historyInsights)
 
-      // Efficiency opportunity insight
-      insights.push({
-        id: uuidv4(),
-        type: 'efficiency_opportunity',
-        title: 'Token Optimization Opportunity',
-        description: '20% of requests have excessive token usage',
-        severity: 'medium',
-        data: {
-          totalRequests: 1000,
-          excessiveTokenRequests: 200,
-          percentage: 20,
-          potentialSavings: 0.15
-        },
-        timestamp: new Date(),
-        recommendations: [
-          'Implement prompt optimization for high-token requests',
-          'Add token usage alerts',
-          'Provide token optimization guidelines'
-        ]
-      })
-
-      return insights.sort((a, b) => {
-        const severityOrder = { high: 3, medium: 2, low: 1 }
-        return severityOrder[b.severity] - severityOrder[a.severity]
-      })
+      return insights
     } catch (error) {
       console.error('Failed to get optimization insights:', error)
       throw error
@@ -822,105 +629,21 @@ export class OptimizationEngine implements IOptimizationEngine {
     try {
       const recommendations: OptimizationRecommendation[] = []
 
-      // Model selection recommendation
-      recommendations.push({
-        id: uuidv4(),
-        type: 'model_selection',
-        title: 'Optimize Model Selection',
-        description: 'Switch to more cost-effective models for specific task types',
-        priority: 'high',
-        estimatedSavings: 0.25,
-        implementationDifficulty: 'medium',
-        estimatedImpact: {
-          costReduction: 0.25,
-          performanceChange: -0.05,
-          qualityChange: -0.02,
-          reliabilityChange: 0
-        },
-        steps: [
-          'Analyze current model usage patterns',
-          'Identify opportunities for model substitution',
-          'Implement model selection logic',
-          'Monitor and adjust based on performance'
-        ],
-        prerequisites: [
-          'Model performance data',
-          'Cost analysis capabilities'
-        ],
-        risks: [
-          'Potential quality degradation',
-          'Implementation complexity'
-        ],
-        timestamp: new Date()
-      })
+      // Get current system state
+      const budgetStatus = await this.budgetManager.getBudgetStatus()
+      const spendingBreakdown = await this.budgetManager.getSpendingBreakdown()
 
-      // Token optimization recommendation
-      recommendations.push({
-        id: uuidv4(),
-        type: 'token_optimization',
-        title: 'Implement Token Optimization',
-        description: 'Reduce token consumption through prompt optimization and caching',
-        priority: 'medium',
-        estimatedSavings: 0.15,
-        implementationDifficulty: 'low',
-        estimatedImpact: {
-          costReduction: 0.15,
-          performanceChange: 0.1,
-          qualityChange: 0,
-          reliabilityChange: 0.05
-        },
-        steps: [
-          'Implement prompt compression',
-          'Add response caching',
-          'Optimize context windows',
-          'Monitor token usage patterns'
-        ],
-        prerequisites: [
-          'Caching infrastructure',
-          'Token analysis tools'
-        ],
-        risks: [
-          'Cache management complexity',
-          'Potential information loss'
-        ],
-        timestamp: new Date()
-      })
+      // Generate cost-based recommendations
+      const costRecommendations = this.generateCostRecommendations(spendingBreakdown, budgetStatus)
+      recommendations.push(...costRecommendations)
 
-      // Budget adjustment recommendation
-      recommendations.push({
-        id: uuidv4(),
-        type: 'budget_adjustment',
-        title: 'Optimize Budget Allocation',
-        description: 'Reallocate budget from underutilized to overutilized services',
-        priority: 'medium',
-        estimatedSavings: 0.1,
-        implementationDifficulty: 'medium',
-        estimatedImpact: {
-          costReduction: 0.1,
-          performanceChange: 0,
-          qualityChange: 0,
-          reliabilityChange: 0.1
-        },
-        steps: [
-          'Analyze budget utilization patterns',
-          'Identify underutilized and overutilized services',
-          'Calculate optimal reallocation amounts',
-          'Implement budget adjustments',
-          'Monitor post-adjustment performance'
-        ],
-        prerequisites: [
-          'Budget utilization data',
-          'Cost analysis capabilities'
-        ],
-        risks: [
-          'Service disruption during reallocation',
-          'Inaccurate utilization projections'
-        ],
-        timestamp: new Date()
-      })
+      // Generate performance-based recommendations
+      const performanceRecommendations = this.generatePerformanceRecommendations()
+      recommendations.push(...performanceRecommendations)
 
+      // Sort by priority
       return recommendations.sort((a, b) => {
-        const priorityOrder = { high: 3, medium: 2, low: 1 }
+        const priorityOrder = { 'high': 3, 'medium': 2, 'low': 1 }
         return priorityOrder[b.priority] - priorityOrder[a.priority]
       })
     } catch (error) {
@@ -929,62 +652,33 @@ export class OptimizationEngine implements IOptimizationEngine {
     }
   }
 
-  async applyOptimization(optimizationId: string): Promise<OptimizationApplicationResult> {
+  async applyOptimization(optimizationId: string): Promise<OptimizationResult> {
     if (!this.initialized) {
       throw new Error('Optimization engine not initialized')
     }
 
     try {
       // Find optimization in history
-      const optimization = this.optimizationHistory.find(opt => opt.id === optimizationId)
-      if (!optimization) {
-        throw new Error(`Optimization ${optimizationId} not found`)
+      const optimizationRecord = this.optimizationHistory.find(record => 
+        (record.result as OptimizationResult).id === optimizationId
+      )
+
+      if (!optimizationRecord) {
+        throw new Error(`Optimization with ID ${optimizationId} not found`)
       }
 
-      const appliedSteps: string[] = []
-      const failedSteps: string[] = []
-      const errors: string[] = []
-      const warnings: string[] = []
+      const result = optimizationRecord.result as OptimizationResult
+      
+      // Apply optimization (this would be implemented based on specific optimization type)
+      console.log(`Applying optimization ${optimizationId}: ${result.recommendedProvider}:${result.recommendedModel}`)
 
-      // Apply optimization steps
-      // In a real implementation, this would apply the actual optimization
-      // For now, we'll simulate the application
+      // Mark as applied
+      result.applied = true
+      optimizationRecord.applied = true
 
-      try {
-        // Simulate optimization application
-        appliedSteps.push('Applied model selection optimization')
-        appliedSteps.push('Applied token optimization')
-        
-        // Add some warnings
-        warnings.push('Monitor performance after optimization')
-        warnings.push('Review optimization effectiveness after 1 week')
-      } catch (error) {
-        failedSteps.push('Failed to apply optimization')
-        errors.push((error as Error).message)
-      }
-
-      // Record optimization application
-      const applicationResult: OptimizationApplicationResult = {
-        id: uuidv4(),
-        optimizationId,
-        success: failedSteps.length === 0,
-        appliedSteps,
-        failedSteps,
-        actualSavings: optimization.savings * 0.9, // Assume 90% of projected savings
-        actualImpact: optimization.impact,
-        errors,
-        warnings,
-        timestamp: new Date()
-      }
-
-      // Update optimization record
-      optimization.success = applicationResult.success
-      optimization.appliedBy = 'system'
-      this.optimizationHistory.push(optimization)
-
-      return applicationResult
+      return result
     } catch (error) {
-      console.error(`Failed to apply optimization ${optimizationId}:`, error)
+      console.error('Failed to apply optimization:', error)
       throw error
     }
   }
@@ -994,600 +688,571 @@ export class OptimizationEngine implements IOptimizationEngine {
       throw new Error('Optimization engine not initialized')
     }
 
-    return [...this.optimizationHistory].sort((a, b) => 
-      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    )
+    return [...this.optimizationHistory]
   }
 
-  async setOptimizationRule(rule: OptimizationRule): Promise<void> {
+  async benchmarkPerformance(benchmarkRequest: BenchmarkRequest): Promise<BenchmarkResult> {
     if (!this.initialized) {
       throw new Error('Optimization engine not initialized')
     }
 
     try {
-      const ruleWithDefaults: OptimizationRule = {
-        ...rule,
-        applicationCount: 0,
-        totalSavings: 0,
-        createdAt: new Date(),
-        lastModified: new Date()
+      const results: ModelBenchmarkResult[] = []
+
+      // Benchmark each model
+      for (const model of benchmarkRequest.models) {
+        const modelResult = await this.benchmarkModel(model, benchmarkRequest.testCases, benchmarkRequest.metrics)
+        results.push(modelResult)
       }
 
-      this.optimizationRules.set(rule.id, ruleWithDefaults)
-      console.log(`Optimization rule ${rule.name} set successfully`)
+      // Calculate rankings
+      this.calculateBenchmarkRankings(results)
+
+      // Generate summary
+      const summary = this.generateBenchmarkSummary(results)
+
+      // Generate recommendations
+      const recommendations = this.generateBenchmarkRecommendations(results)
+
+      return {
+        id: uuidv4(),
+        timestamp: new Date(),
+        results,
+        summary,
+        recommendations
+      }
     } catch (error) {
-      console.error('Failed to set optimization rule:', error)
+      console.error('Failed to benchmark performance:', error)
       throw error
     }
   }
 
-  async removeOptimizationRule(ruleId: string): Promise<void> {
-    if (!this.initialized) {
-      throw new Error('Optimization engine not initialized')
-    }
-
-    try {
-      const deleted = this.optimizationRules.delete(ruleId)
-      if (!deleted) {
-        throw new Error(`Optimization rule ${ruleId} not found`)
+  // Private helper methods
+  private getDefaultOptimizationStrategies(): OptimizationStrategy[] {
+    return [
+      {
+        id: 'cost_optimization',
+        name: 'Cost Optimization',
+        description: 'Optimize for cost efficiency',
+        type: 'model_selection',
+        enabled: true,
+        priority: 1,
+        conditions: [
+          {
+            type: 'cost',
+            operator: 'greater_than',
+            value: 0.05,
+            metric: 'cost_per_request'
+          }
+        ],
+        actions: [
+          {
+            type: 'switch_model',
+            parameters: {
+              strategy: 'cost_efficient'
+            }
+          }
+        ]
+      },
+      {
+        id: 'performance_optimization',
+        name: 'Performance Optimization',
+        description: 'Optimize for response time',
+        type: 'model_selection',
+        enabled: true,
+        priority: 2,
+        conditions: [
+          {
+            type: 'performance',
+            operator: 'greater_than',
+            value: 2000,
+            metric: 'latency'
+          }
+        ],
+        actions: [
+          {
+            type: 'switch_model',
+            parameters: {
+              strategy: 'fastest'
+            }
+          }
+        ]
+      },
+      {
+        id: 'quality_optimization',
+        name: 'Quality Optimization',
+        description: 'Optimize for output quality',
+        type: 'model_selection',
+        enabled: true,
+        priority: 3,
+        conditions: [
+          {
+            type: 'quality',
+            operator: 'less_than',
+            value: 0.8,
+            metric: 'accuracy'
+          }
+        ],
+        actions: [
+          {
+            type: 'switch_model',
+            parameters: {
+              strategy: 'highest_quality'
+            }
+          }
+        ]
       }
-      console.log(`Optimization rule ${ruleId} removed successfully`)
-    } catch (error) {
-      console.error(`Failed to remove optimization rule ${ruleId}:`, error)
-      throw error
-    }
+    ]
   }
 
-  async getOptimizationRules(): Promise<OptimizationRule[]> {
-    if (!this.initialized) {
-      throw new Error('Optimization engine not initialized')
-    }
+  private async applyOptimizationStrategies(request: OptimizationRequest, baseResult: OptimizationResult): Promise<OptimizationResult> {
+    let result = { ...baseResult }
 
-    return Array.from(this.optimizationRules.values())
-  }
+    for (const strategy of this.optimizationStrategies) {
+      if (!strategy.enabled) continue
 
-  private async initializeModelCapabilities(): Promise<void> {
-    // Initialize model capabilities
-    this.modelCapabilities.set('gpt-4', {
-      maxTokens: 8192,
-      streaming: true,
-      chat: true,
-      completion: true,
-      embeddings: false,
-      vision: false,
-      functionCalling: true,
-      jsonMode: true,
-      contextWindow: 8192,
-      supportedLanguages: ['en'],
-      specialFeatures: ['function_calling', 'json_mode']
-    })
+      // Check if strategy conditions are met
+      const conditionsMet = strategy.conditions.every(condition => this.checkOptimizationCondition(condition, request, result))
 
-    this.modelCapabilities.set('gpt-3.5-turbo', {
-      maxTokens: 4096,
-      streaming: true,
-      chat: true,
-      completion: true,
-      embeddings: false,
-      vision: false,
-      functionCalling: true,
-      jsonMode: true,
-      contextWindow: 4096,
-      supportedLanguages: ['en'],
-      specialFeatures: ['function_calling', 'json_mode']
-    })
-
-    this.modelCapabilities.set('claude-3-opus-20240229', {
-      maxTokens: 200000,
-      streaming: true,
-      chat: true,
-      completion: true,
-      embeddings: false,
-      vision: true,
-      functionCalling: false,
-      jsonMode: false,
-      contextWindow: 200000,
-      supportedLanguages: ['en'],
-      specialFeatures: ['vision', 'large_context']
-    })
-
-    this.modelCapabilities.set('claude-3-sonnet-20240229', {
-      maxTokens: 200000,
-      streaming: true,
-      chat: true,
-      completion: true,
-      embeddings: false,
-      vision: true,
-      functionCalling: false,
-      jsonMode: false,
-      contextWindow: 200000,
-      supportedLanguages: ['en'],
-      specialFeatures: ['vision', 'large_context']
-    })
-
-    this.modelCapabilities.set('claude-3-haiku-20240307', {
-      maxTokens: 200000,
-      streaming: true,
-      chat: true,
-      completion: true,
-      embeddings: false,
-      vision: true,
-      functionCalling: false,
-      jsonMode: false,
-      contextWindow: 200000,
-      supportedLanguages: ['en'],
-      specialFeatures: ['vision', 'large_context', 'fast_response']
-    })
-  }
-
-  private async matchesOptimizationCondition(condition: OptimizationCondition, request: CostEstimationRequest): Promise<boolean> {
-    // Check model
-    if (condition.model && condition.model !== request.model) {
-      return false
-    }
-
-    // Check request type
-    if (condition.requestType && condition.requestType !== request.requestType) {
-      return false
-    }
-
-    // Check token range
-    const totalTokens = request.inputTokens + (request.outputTokens || 0)
-    if (condition.minTokens && totalTokens < condition.minTokens) {
-      return false
-    }
-
-    if (condition.maxTokens && totalTokens > condition.maxTokens) {
-      return false
-    }
-
-    // Check cost range
-    const estimatedCost = this.estimateSimpleCost(request)
-    if (condition.minCost && estimatedCost < condition.minCost) {
-      return false
-    }
-
-    if (condition.maxCost && estimatedCost > condition.maxCost) {
-      return false
-    }
-
-    // Check time range
-    if (condition.timeRange) {
-      const now = new Date()
-      if (now < condition.timeRange.start || now > condition.timeRange.end) {
-        return false
+      if (conditionsMet) {
+        // Apply strategy actions
+        for (const action of strategy.actions) {
+          result = await this.applyOptimizationAction(action, request, result)
+        }
       }
     }
 
-    // Check custom condition
-    if (condition.customCondition) {
-      return await condition.customCondition(request)
-    }
+    return result
+  }
 
+  private checkOptimizationCondition(condition: OptimizationCondition, request: OptimizationRequest, currentResult: OptimizationResult): boolean {
+    // This would implement condition checking logic
+    // For now, return true as a placeholder
     return true
   }
 
-  private async applyOptimizationRule(rule: OptimizationRule, request: CostEstimationRequest): Promise<{
-    request: CostEstimationRequest
-    savings: number
-    impact: OptimizationImpact
-    step: OptimizationStep
-  }> {
-    const originalCost = this.estimateSimpleCost(request)
-    let optimizedRequest = { ...request }
-    let savings = 0
-    let impact: OptimizationImpact = {
-      costReduction: 0,
-      performanceChange: 0,
-      qualityChange: 0,
-      reliabilityChange: 0
-    }
-
-    switch (rule.action.type) {
-      case 'switch_model':
-        optimizedRequest.model = rule.action.target
-        const optimizedCost = this.estimateSimpleCost(optimizedRequest)
-        savings = originalCost - optimizedCost
-        impact = {
-          costReduction: savings / originalCost,
-          performanceChange: -0.05, // Slight performance impact
-          qualityChange: -0.02, // Slight quality impact
-          reliabilityChange: 0
-        }
-        break
-
-      case 'reduce_tokens':
-        const tokenReduction = rule.action.parameters.tokenReduction || 0
-        optimizedRequest.inputTokens = Math.max(1, request.inputTokens - tokenReduction)
-        if (request.outputTokens) {
-          optimizedRequest.outputTokens = Math.max(1, request.outputTokens - (rule.action.parameters.outputTokenReduction || 0))
-        }
-        savings = this.estimateTokenSavings(request.model, tokenReduction, rule.action.parameters.outputTokenReduction || 0)
-        impact = {
-          costReduction: savings / originalCost,
-          performanceChange: 0.1, // Performance improvement
-          qualityChange: -0.05, // Slight quality impact
-          reliabilityChange: 0.05
-        }
-        break
-    }
-
-    const step: OptimizationStep = {
-      type: rule.action.type === 'switch_model' ? 'model_switch' : 'token_reduction',
-      description: rule.action.description,
-      impact: savings / originalCost,
-      confidence: 0.8,
-      implementation: rule.action.parameters.implementation || 'Apply optimization rule'
-    }
-
-    return {
-      request: optimizedRequest,
-      savings,
-      impact,
-      step
-    }
+  private async applyOptimizationAction(action: OptimizationAction, request: OptimizationRequest, currentResult: OptimizationResult): Promise<OptimizationResult> {
+    // This would implement action application logic
+    // For now, return the current result as a placeholder
+    return currentResult
   }
 
-  private async optimizeModelForRequest(request: CostEstimationRequest): Promise<{
-    recommendedModel: string
-    savings: number
-    impact: OptimizationImpact
-    step: OptimizationStep
-  }> {
-    const originalCost = this.estimateSimpleCost(request)
-    const optimalModel = await this.findOptimalModel(request)
-
-    if (optimalModel.model === request.model) {
-      return {
-        recommendedModel: request.model,
-        savings: 0,
-        impact: {
-          costReduction: 0,
-          performanceChange: 0,
-          qualityChange: 0,
-          reliabilityChange: 0
-        },
-        step: {
-          type: 'model_switch',
-          description: 'No model change needed',
-          impact: 0,
-          confidence: 1,
-          implementation: 'Keep current model'
-        }
-      }
-    }
-
-    const optimizedCost = this.estimateSimpleCost({ ...request, model: optimalModel.model })
-    const savings = originalCost - optimizedCost
-
-    return {
-      recommendedModel: optimalModel.model,
-      savings,
-      impact: {
-        costReduction: savings / originalCost,
-        performanceChange: optimalModel.performanceImpact,
-        qualityChange: optimalModel.qualityImpact,
-        reliabilityChange: optimalModel.reliabilityImpact
-      },
-      step: {
-        type: 'model_switch',
-        description: `Switch from ${request.model} to ${optimalModel.model}`,
-        impact: savings / originalCost,
-        confidence: optimalModel.confidence,
-        implementation: `Update model selection to use ${optimalModel.model} for this request type`
-      }
-    }
-  }
-
-  private async findOptimalModel(request: CostEstimationRequest): Promise<{
-    model: string
-    reason: string
-    savings: number
-    confidence: number
-    performanceImpact: number
-    qualityImpact: number
-    reliabilityImpact: number
-  }> {
-    const availableModels = Array.from(this.modelCapabilities.keys())
-    const originalCost = this.estimateSimpleCost(request)
-    let bestModel = request.model
-    let bestSavings = 0
-    let bestReason = 'Current model is optimal'
-    let bestConfidence = 0.5
-    let bestPerformanceImpact = 0
-    let bestQualityImpact = 0
-    let bestReliabilityImpact = 0
-
-    for (const model of availableModels) {
-      if (model === request.model) continue
-
-      const modelCapabilities = this.modelCapabilities.get(model)!
+  private estimateStepTime(step: WorkflowStep, optimization?: OptimizationResult): number {
+    // Estimate execution time for a step
+    if (step.type === 'llm_call') {
+      // Base time estimation for LLM calls
+      const baseTime = 1000 // 1 second base time
+      const inputTokenFactor = step.inputTokens ? step.inputTokens * 0.01 : 0
+      const outputTokenFactor = step.outputTokens ? step.outputTokens * 0.02 : 0
       
-      // Check if model supports the request type
-      if (request.requestType === 'chat' && !modelCapabilities.chat) continue
-      if (request.requestType === 'completion' && !modelCapabilities.completion) continue
-      if (request.requestType === 'embedding' && !modelCapabilities.embeddings) continue
-
-      // Check token limits
-      const totalTokens = request.inputTokens + (request.outputTokens || 0)
-      if (totalTokens > modelCapabilities.maxTokens) continue
-
-      // Calculate cost
-      const optimizedCost = this.estimateSimpleCost({ ...request, model })
-      const savings = originalCost - optimizedCost
-
-      if (savings > bestSavings && savings > originalCost * this.config.savingsThreshold!) {
-        bestModel = model
-        bestSavings = savings
-        bestReason = `Cost savings of $${savings.toFixed(4)} (${((savings / originalCost) * 100).toFixed(1)}%)`
-        bestConfidence = 0.8
-        bestPerformanceImpact = model === 'gpt-3.5-turbo' ? 0.1 : -0.05
-        bestQualityImpact = model === 'gpt-4' ? 0.1 : -0.05
-        bestReliabilityImpact = 0
-      }
+      return baseTime + inputTokenFactor + outputTokenFactor
     }
-
-    return {
-      model: bestModel,
-      reason: bestReason,
-      savings: bestSavings,
-      confidence: bestConfidence,
-      performanceImpact: bestPerformanceImpact,
-      qualityImpact: bestQualityImpact,
-      reliabilityImpact: bestReliabilityImpact
-    }
-  }
-
-  private async optimizeTokensForRequest(request: CostEstimationRequest): Promise<{
-    optimizedInputTokens: number
-    optimizedOutputTokens?: number
-    savings: number
-    impact: OptimizationImpact
-    step: OptimizationStep
-  }> {
-    let optimizedInputTokens = request.inputTokens
-    let optimizedOutputTokens = request.outputTokens
-    let totalSavings = 0
-
-    // Prompt compression
-    if (request.inputTokens > 1000) {
-      const compressionRatio = 0.9 // 10% compression
-      const compressedTokens = Math.floor(request.inputTokens * compressionRatio)
-      const tokenReduction = request.inputTokens - compressedTokens
-      const savings = this.estimateTokenSavings(request.model, tokenReduction, 0)
-      
-      if (savings > 0) {
-        optimizedInputTokens = compressedTokens
-        totalSavings += savings
-      }
-    }
-
-    // Output optimization
-    if (request.outputTokens && request.outputTokens > 500) {
-      const outputReduction = Math.floor(request.outputTokens * 0.05) // 5% reduction
-      const savings = this.estimateTokenSavings(request.model, 0, outputReduction)
-      
-      if (savings > 0) {
-        optimizedOutputTokens = request.outputTokens - outputReduction
-        totalSavings += savings
-      }
-    }
-
-    const impact: OptimizationImpact = {
-      costReduction: totalSavings / this.estimateSimpleCost(request),
-      performanceChange: 0.1,
-      qualityChange: -0.05,
-      reliabilityChange: 0.05
-    }
-
-    const step: OptimizationStep = {
-      type: 'token_reduction',
-      description: 'Optimize token usage through compression and truncation',
-      impact: totalSavings / this.estimateSimpleCost(request),
-      confidence: 0.7,
-      implementation: 'Apply token optimization techniques'
-    }
-
-    return {
-      optimizedInputTokens,
-      optimizedOutputTokens,
-      savings: totalSavings,
-      impact,
-      step
-    }
-  }
-
-  private async optimizeBatchProcessing(requests: CostEstimationRequest[]): Promise<{
-    savings: number
-    step: BatchOptimizationStep
-  }> {
-    // Simple batch processing optimization
-    const originalCosts = requests.map(request => this.estimateSimpleCost(request))
-    const originalTotalCost = originalCosts.reduce((sum, cost) => sum + cost, 0)
     
-    // Assume 5% savings from batch processing
-    const savings = originalTotalCost * 0.05
+    // Default time for other step types
+    return 500
+  }
+
+  private calculateWorkflowConfidence(steps: OptimizedWorkflowStep[]): number {
+    if (steps.length === 0) return 0
+
+    const totalConfidence = steps.reduce((sum, step) => {
+      // Calculate confidence based on savings and reasoning
+      const stepConfidence = step.savings > 0 ? 0.8 : 0.5
+      return sum + stepConfidence
+    }, 0)
+
+    return totalConfidence / steps.length
+  }
+
+  private generateWorkflowRecommendations(steps: OptimizedWorkflowStep[], workflow: WorkflowOptimizationRequest): string[] {
+    const recommendations: string[] = []
+
+    // Analyze savings opportunities
+    const totalSavings = steps.reduce((sum, step) => sum + step.savings, 0)
+    if (totalSavings > 0) {
+      recommendations.push(`Estimated cost savings of $${totalSavings.toFixed(2)} can be achieved by optimizing model selection.`)
+    }
+
+    // Analyze performance opportunities
+    const slowSteps = steps.filter(step => step.estimatedTime > 2000)
+    if (slowSteps.length > 0) {
+      recommendations.push(`${slowSteps.length} steps have high execution time. Consider parallel processing or faster models.`)
+    }
+
+    // Analyze model consistency
+    const uniqueModels = new Set(steps.map(step => step.recommendedModel).filter(Boolean))
+    if (uniqueModels.size > 3) {
+      recommendations.push('Consider standardizing on fewer models to simplify maintenance and improve consistency.')
+    }
+
+    return recommendations
+  }
+
+  private async analyzeOptimizationArea(focusArea: OptimizationFocusArea, budgetStatus: BudgetStatus, spendingBreakdown: SpendingBreakdown): Promise<SystemOptimization[]> {
+    const optimizations: SystemOptimization[] = []
+
+    switch (focusArea.type) {
+      case 'cost':
+        const costOptimizations = this.analyzeCostOptimizations(budgetStatus, spendingBreakdown)
+        optimizations.push(...costOptimizations)
+        break
+      case 'performance':
+        const performanceOptimizations = this.analyzePerformanceOptimizations()
+        optimizations.push(...performanceOptimizations)
+        break
+      case 'quality':
+        const qualityOptimizations = this.analyzeQualityOptimizations()
+        optimizations.push(...qualityOptimizations)
+        break
+      case 'reliability':
+        const reliabilityOptimizations = this.analyzeReliabilityOptimizations()
+        optimizations.push(...reliabilityOptimizations)
+        break
+    }
+
+    return optimizations
+  }
+
+  private analyzeCostOptimizations(budgetStatus: BudgetStatus, spendingBreakdown: SpendingBreakdown): SystemOptimization[] {
+    const optimizations: SystemOptimization[] = []
+
+    // Analyze provider costs
+    const providerCosts = Object.entries(spendingBreakdown.byProvider)
+      .sort((a, b) => b[1].amount - a[1].amount)
+
+    if (providerCosts.length > 1) {
+      const mostExpensive = providerCosts[0]
+      const leastExpensive = providerCosts[providerCosts.length - 1]
+
+      if (mostExpensive[1].amount > leastExpensive[1].amount * 2) {
+        optimizations.push({
+          id: uuidv4(),
+          type: 'model_migration',
+          description: `Migrate workload from ${mostExpensive[0]} to ${leastExpensive[0]}`,
+          estimatedSavings: mostExpensive[1].amount - leastExpensive[1].amount,
+          estimatedImprovement: 10,
+          complexity: 'medium',
+          impact: 'high',
+          steps: [
+            {
+              id: 'analysis',
+              description: 'Analyze compatible models between providers',
+              type: 'configuration',
+              duration: 8,
+              resources: ['developer'],
+              risks: ['Model compatibility issues']
+            },
+            {
+              id: 'migration',
+              description: 'Migrate workload to new provider',
+              type: 'deployment',
+              duration: 16,
+              resources: ['developer', 'devops'],
+              risks: ['Service disruption', 'Data migration issues']
+            }
+          ]
+        })
+      }
+    }
+
+    return optimizations
+  }
+
+  private analyzePerformanceOptimizations(): SystemOptimization[] {
+    // Placeholder for performance optimization analysis
+    return []
+  }
+
+  private analyzeQualityOptimizations(): SystemOptimization[] {
+    // Placeholder for quality optimization analysis
+    return []
+  }
+
+  private analyzeReliabilityOptimizations(): SystemOptimization[] {
+    // Placeholder for reliability optimization analysis
+    return []
+  }
+
+  private generateImplementationPlan(optimizations: SystemOptimization[]): ImplementationPlan {
+    const phases: ImplementationPhase[] = []
+    let totalDuration = 0
+
+    // Group optimizations by complexity
+    const lowComplexity = optimizations.filter(opt => opt.complexity === 'low')
+    const mediumComplexity = optimizations.filter(opt => opt.complexity === 'medium')
+    const highComplexity = optimizations.filter(opt => opt.complexity === 'high')
+
+    if (lowComplexity.length > 0) {
+      phases.push({
+        id: 'phase1',
+        name: 'Quick Wins',
+        duration: 5,
+        steps: lowComplexity.flatMap(opt => opt.steps)
+      })
+      totalDuration += 5
+    }
+
+    if (mediumComplexity.length > 0) {
+      phases.push({
+        id: 'phase2',
+        name: 'Medium Complexity Optimizations',
+        duration: 10,
+        steps: mediumComplexity.flatMap(opt => opt.steps),
+        dependencies: lowComplexity.length > 0 ? ['phase1'] : undefined
+      })
+      totalDuration += 10
+    }
+
+    if (highComplexity.length > 0) {
+      phases.push({
+        id: 'phase3',
+        name: 'Complex Optimizations',
+        duration: 20,
+        steps: highComplexity.flatMap(opt => opt.steps),
+        dependencies: mediumComplexity.length > 0 ? ['phase2'] : undefined
+      })
+      totalDuration += 20
+    }
 
     return {
-      savings,
-      step: {
-        type: 'batch_processing',
-        description: 'Process requests in batches to reduce API overhead',
-        affectedRequests: requests.map(r => r.agentId),
-        savings,
+      phases,
+      totalDuration,
+      resourceRequirements: [
+        {
+          type: 'personnel',
+          quantity: 2,
+          unit: 'developers',
+          duration: totalDuration
+        }
+      ]
+    }
+  }
+
+  private assessOptimizationRisks(optimizations: SystemOptimization[]): RiskAssessment[] {
+    const risks: RiskAssessment[] = []
+
+    for (const optimization of optimizations) {
+      for (const step of optimization.steps) {
+        for (const risk of step.risks) {
+          risks.push({
+            type: 'technical',
+            description: risk,
+            likelihood: 'medium',
+            impact: optimization.impact,
+            mitigation: ['Thorough testing', 'Rollback plan', 'Monitoring']
+          })
+        }
+      }
+    }
+
+    return risks
+  }
+
+  private analyzeCostPatterns(spendingBreakdown: SpendingBreakdown, budgetStatus: BudgetStatus): OptimizationInsight[] {
+    const insights: OptimizationInsight[] = []
+
+    // Analyze provider concentration
+    const providers = Object.keys(spendingBreakdown.byProvider)
+    if (providers.length === 1) {
+      insights.push({
+        id: uuidv4(),
+        type: 'cost_opportunity',
+        title: 'Provider Concentration Risk',
+        description: 'All spending is concentrated with a single provider, creating vendor lock-in risk',
+        impact: 'medium',
+        confidence: 0.9,
+        actionable: true,
+        timestamp: new Date()
+      })
+    }
+
+    // Analyze budget utilization
+    if (budgetStatus.percentageUsed > 90) {
+      insights.push({
+        id: uuidv4(),
+        type: 'cost_opportunity',
+        title: 'High Budget Utilization',
+        description: `Budget utilization is at ${budgetStatus.percentageUsed.toFixed(1)}%, consider cost optimization measures`,
+        impact: 'high',
+        confidence: 0.95,
+        actionable: true,
+        timestamp: new Date()
+      })
+    }
+
+    return insights
+  }
+
+  private analyzeOptimizationHistory(): OptimizationInsight[] {
+    const insights: OptimizationInsight[] = []
+
+    // Analyze optimization success rate
+    const successfulOptimizations = this.optimizationHistory.filter(record => record.success)
+    const successRate = this.optimizationHistory.length > 0 ? successfulOptimizations.length / this.optimizationHistory.length : 0
+
+    if (successRate < 0.8) {
+      insights.push({
+        id: uuidv4(),
+        type: 'efficiency_gain',
+        title: 'Low Optimization Success Rate',
+        description: `Only ${(successRate * 100).toFixed(1)}% of optimizations were successful`,
+        impact: 'medium',
         confidence: 0.8,
-        implementation: 'Implement batch processing for similar requests'
+        actionable: true,
+        timestamp: new Date()
+      })
+    }
+
+    return insights
+  }
+
+  private generateCostRecommendations(spendingBreakdown: SpendingBreakdown, budgetStatus: BudgetStatus): OptimizationRecommendation[] {
+    const recommendations: OptimizationRecommendation[] = []
+
+    // Analyze model costs
+    const modelCosts = Object.entries(spendingBreakdown.byModel)
+      .sort((a, b) => b[1].amount - a[1].amount)
+
+    if (modelCosts.length > 1) {
+      const mostExpensive = modelCosts[0]
+      const leastExpensive = modelCosts[modelCosts.length - 1]
+
+      if (mostExpensive[1].averageCostPerRequest > leastExpensive[1].averageCostPerRequest * 2) {
+        recommendations.push({
+          id: uuidv4(),
+          type: 'model_switch',
+          title: 'Switch to More Cost-Efficient Model',
+          description: `Consider switching from ${mostExpensive[0]} to ${leastExpensive[0]} for cost savings`,
+          estimatedImpact: {
+            cost: mostExpensive[1].amount - leastExpensive[1].amount,
+            performance: -5,
+            quality: -10
+          },
+          complexity: 'low',
+          priority: 'high',
+          implementation: [
+            'Evaluate model compatibility',
+            'Update model configuration',
+            'Test with sample requests',
+            'Monitor performance and cost'
+          ],
+          timestamp: new Date()
+        })
       }
+    }
+
+    return recommendations
+  }
+
+  private generatePerformanceRecommendations(): OptimizationRecommendation[] {
+    // Placeholder for performance recommendations
+    return []
+  }
+
+  private recordOptimization(type: 'request' | 'workflow' | 'system', result: any): void {
+    const record: OptimizationRecord = {
+      id: uuidv4(),
+      type,
+      success: result.success,
+      applied: false,
+      result,
+      timestamp: new Date()
+    }
+
+    if (type === 'request') {
+      record.requestId = result.requestId
+    } else if (type === 'workflow') {
+      record.workflowId = result.workflowId
+    }
+
+    this.optimizationHistory.push(record)
+  }
+
+  private async benchmarkModel(model: BenchmarkModel, testCases: TestCase[], metrics: BenchmarkMetric[]): Promise<ModelBenchmarkResult> {
+    // This would implement actual benchmarking logic
+    // For now, return mock data
+    return {
+      providerId: model.providerId,
+      modelId: model.modelId,
+      metrics: {
+        latency: 1500,
+        accuracy: 0.85,
+        cost: 0.05,
+        throughput: 15
+      },
+      score: 0.82,
+      rank: 1,
+      strengths: ['Fast response time', 'Good accuracy'],
+      weaknesses: ['Higher cost', 'Limited capabilities']
     }
   }
 
-  private async standardizeModels(requests: CostEstimationRequest[]): Promise<{
-    requests: CostEstimationRequest[]
-    savings: number
-    step: BatchOptimizationStep
-  }> {
-    // Find most commonly used model
-    const modelUsage: Record<string, number> = {}
-    requests.forEach(request => {
-      modelUsage[request.model] = (modelUsage[request.model] || 0) + 1
+  private calculateBenchmarkRankings(results: ModelBenchmarkResult[]): void {
+    // Sort by score and assign ranks
+    results.sort((a, b) => b.score - a.score)
+    results.forEach((result, index) => {
+      result.rank = index + 1
     })
+  }
 
-    const mostUsedModel = Object.entries(modelUsage).sort((a, b) => b[1] - a[1])[0][0]
-    
-    // Standardize on most used model where appropriate
-    const standardizedRequests = requests.map(request => {
-      // Only standardize if the model is suitable for the request type
-      const modelCapabilities = this.modelCapabilities.get(mostUsedModel)!
-      if (
-        (request.requestType === 'chat' && modelCapabilities.chat) ||
-        (request.requestType === 'completion' && modelCapabilities.completion) ||
-        (request.requestType === 'embedding' && modelCapabilities.embeddings)
-      ) {
-        return { ...request, model: mostUsedModel }
-      }
-      return request
-    })
+  private generateBenchmarkSummary(results: ModelBenchmarkResult[]): BenchmarkSummary {
+    const bestOverall = results.reduce((best, current) => 
+      current.score > best.score ? current : best
+    )
 
-    // Calculate savings
-    const originalCosts = requests.map(request => this.estimateSimpleCost(request))
-    const optimizedCosts = standardizedRequests.map(request => this.estimateSimpleCost(request))
-    const originalTotalCost = originalCosts.reduce((sum, cost) => sum + cost, 0)
-    const optimizedTotalCost = optimizedCosts.reduce((sum, cost) => sum + cost, 0)
-    const savings = originalTotalCost - optimizedTotalCost
+    const bestCostEfficient = results.reduce((best, current) => 
+      current.metrics.cost < best.metrics.cost ? current : best
+    )
+
+    const bestPerformance = results.reduce((best, current) => 
+      current.metrics.latency < best.metrics.latency ? current : best
+    )
 
     return {
-      requests: standardizedRequests,
-      savings,
-      step: {
-        type: 'model_standardization',
-        description: `Standardize on ${mostUsedModel} for consistent pricing`,
-        affectedRequests: requests.map(r => r.agentId),
-        savings,
-        confidence: 0.7,
-        implementation: 'Update model selection to use standardized model'
-      }
+      bestOverallModel: `${bestOverall.providerId}:${bestOverall.modelId}`,
+      bestCostEfficientModel: `${bestCostEfficient.providerId}:${bestCostEfficient.modelId}`,
+      bestPerformanceModel: `${bestPerformance.providerId}:${bestPerformance.modelId}`,
+      keyFindings: [
+        'Performance varies significantly between providers',
+        'Cost efficiency does not always correlate with performance',
+        'Model selection should be based on specific use case requirements'
+      ]
     }
   }
 
-  private async groupSimilarRequests(requests: CostEstimationRequest[]): Promise<{
-    requests: CostEstimationRequest[]
-    savings: number
-    step: BatchOptimizationStep
-  }> {
-    // Simple grouping by request type
-    const groupedRequests: Record<string, CostEstimationRequest[]> = {}
-    requests.forEach(request => {
-      if (!groupedRequests[request.requestType]) {
-        groupedRequests[request.requestType] = []
-      }
-      groupedRequests[request.requestType].push(request)
-    })
+  private generateBenchmarkRecommendations(results: ModelBenchmarkResult[]): string[] {
+    const recommendations: string[] = []
 
-    // Assume 3% savings from grouping
-    const originalCosts = requests.map(request => this.estimateSimpleCost(request))
-    const originalTotalCost = originalCosts.reduce((sum, cost) => sum + cost, 0)
-    const savings = originalTotalCost * 0.03
+    // Analyze trade-offs
+    const fastest = results.reduce((best, current) => 
+      current.metrics.latency < best.metrics.latency ? current : best
+    )
 
-    return {
-      requests,
-      savings,
-      step: {
-        type: 'request_grouping',
-        description: 'Group similar requests for processing efficiency',
-        affectedRequests: requests.map(r => r.agentId),
-        savings,
-        confidence: 0.6,
-        implementation: 'Implement request grouping by type'
-      }
-    }
-  }
+    const mostAccurate = results.reduce((best, current) => 
+      current.metrics.accuracy > best.metrics.accuracy ? current : best
+    )
 
-  private estimateSimpleCost(request: CostEstimationRequest): number {
-    // Simple cost estimation based on model and token count
-    const pricing: Record<string, { input: number; output: number }> = {
-      'gpt-4': { input: 0.03, output: 0.06 },
-      'gpt-3.5-turbo': { input: 0.0015, output: 0.002 },
-      'claude-3-opus-20240229': { input: 0.015, output: 0.075 },
-      'claude-3-sonnet-20240229': { input: 0.003, output: 0.015 },
-      'claude-3-haiku-20240307': { input: 0.00025, output: 0.00125 }
+    const cheapest = results.reduce((best, current) => 
+      current.metrics.cost < best.metrics.cost ? current : best
+    )
+
+    if (fastest.modelId !== mostAccurate.modelId) {
+      recommendations.push('Consider different models for different use cases based on requirements')
     }
 
-    const modelPricing = pricing[request.model] || { input: 0.01, output: 0.02 }
-    const inputCost = (request.inputTokens / 1000) * modelPricing.input
-    const outputCost = ((request.outputTokens || 0) / 1000) * modelPricing.output
-
-    return inputCost + outputCost
-  }
-private startAutoOptimization(): void {
-    if (this.optimizationInterval) {
-      clearInterval(this.optimizationInterval)
+    if (cheapest.modelId !== fastest.modelId) {
+      recommendations.push('Evaluate cost-performance trade-offs for your specific workload')
     }
 
-    this.optimizationInterval = setInterval(async () => {
-      try {
-        // Perform automatic optimization checks
-        console.log('Running automatic optimization check')
-        // In a real implementation, this would analyze usage patterns and apply optimizations
-      } catch (error) {
-        console.error('Error in automatic optimization:', error)
-      }
-    }, this.config.optimizationInterval!)
+    return recommendations
   }
 
-  private combineOptimizationImpacts(impact1: OptimizationImpact, impact2: OptimizationImpact): OptimizationImpact {
-    return {
-      costReduction: Math.max(impact1.costReduction, impact2.costReduction),
-      performanceChange: impact1.performanceChange + impact2.performanceChange,
-      qualityChange: impact1.qualityChange + impact2.qualityChange,
-      reliabilityChange: impact1.reliabilityChange + impact2.reliabilityChange
-    }
+  // Utility methods
+  isInitialized(): boolean {
+    return this.initialized
   }
 
-  private calculateConfidence(optimizations: OptimizationStep[]): number {
-    if (optimizations.length === 0) return 1.0
-
-    const totalConfidence = optimizations.reduce((sum, opt) => sum + opt.confidence, 0)
-    return Math.min(1.0, totalConfidence / optimizations.length)
+  getConfig(): OptimizationEngineConfig {
+    return { ...this.config }
   }
-
-  private calculateModelConfidence(modelAssignments: ModelAssignment[]): number {
-    if (modelAssignments.length === 0) return 1.0
-
-    const totalConfidence = modelAssignments.reduce((sum, assignment) => sum + assignment.confidence, 0)
-    return Math.min(1.0, totalConfidence / modelAssignments.length)
-  }
-
-  private generateMockUtilization(budget: Budget): BudgetUtilization {
-    const spentAmount = budget.totalAmount * (0.3 + Math.random() * 0.6) // 30-90% utilization
-    const remainingAmount = budget.totalAmount - spentAmount
-    const utilizationPercentage = (spentAmount / budget.totalAmount) * 100
-
-    return {
-      budgetId: budget.id,
-      totalAmount: budget.totalAmount,
-      spentAmount,
-      remainingAmount,
-      utilizationPercentage,
-      currency: budget.currency,
-      dailyAverage: spentAmount / 30,
-      daysRemaining: 15,
-      categoryUtilization: [],
-      timeSeriesData: []
-    }
-  }
-
-  private estimateTokenSavings(model: string, inputTokenReduction: number, outputTokenReduction: number): number {
-    const pricing: Record<string, { input: number; output: number }> = {
-      'gpt-4': { input: 0.03, output: 0.06 },
-      'gpt-3.5-turbo': { input: 0.0015, output: 0.002 },
-      'claude-3-opus-20240229': { input: 0.015, output: 0.075 },
-      'claude-3-sonnet-20240229': { input: 0.003, output: 0.015 },
-      'claude-3-haiku-20240307': { input: 0.00025, output: 0.00125 }
-    }
-
-    const modelPricing = pricing[model] || { input: 0.01, output: 0.02 }
-    const inputCost = (inputTokenReduction / 1000) * modelPricing.input
-    const outputCost = (outputTokenReduction / 1000) * modelPricing.output
-
-    return inputCost + outputCost
 }
-  }
