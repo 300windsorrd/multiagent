@@ -13,14 +13,191 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// ENUMS for various entity states and types
+// Agent Management Enums
+enum AgentType {
+  INBOX_AGENT
+  CALENDAR_AGENT
+  INSIGHT_AGENT
+  PLANNER_AGENT
+  CURATION_AGENT
+  ETHICS_AGENT
+  CUSTOM_AGENT
 }
 
+enum AgentStatus {
+  IDLE
+  RUNNING
+  PAUSED
+  ERROR
+  STOPPED
+  MAINTENANCE
+}
+
+enum AgentExecutionStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+  TIMEOUT
+}
+
+// Workflow System Enums
+enum WorkflowStatus {
+  PENDING
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+  FAILED
+  CANCELLED
+  ARCHIVED
+}
+
+enum WorkflowStepType {
+  TASK
+  DECISION
+  PARALLEL
+  SEQUENTIAL
+  CONDITIONAL
+  AGENT_CALL
+  API_CALL
+  DELAY
+}
+
+enum WorkflowStepStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  SKIPPED
+  CANCELLED
+}
+
+// Authentication & Authorization Enums
+enum OAuthProvider {
+  GOOGLE
+  MICROSOFT
+  GITHUB
+  SLACK
+  DISCORD
+  CUSTOM
+}
+
+enum TokenType {
+  ACCESS
+  REFRESH
+  API_KEY
+  SERVICE_TOKEN
+}
+
+enum PermissionType {
+  READ
+  WRITE
+  EXECUTE
+  DELETE
+  ADMIN
+}
+
+// LLM Integration Enums
+enum LLMProvider {
+  OPENAI
+  ANTHROPIC
+  GOOGLE
+  META
+  COHERE
+  LOCAL
+  CUSTOM
+}
+
+enum LLMModelType {
+  GPT_3_5_TURBO
+  GPT_4
+  GPT_4_TURBO
+  CLAUDE_3_SONNET
+  CLAUDE_3_OPUS
+  GEMINI_PRO
+  LLAMA_2
+  LLAMA_3
+  CUSTOM
+}
+
+// Monitoring & Analytics Enums
+enum MetricType {
+  CPU_USAGE
+  MEMORY_USAGE
+  RESPONSE_TIME
+  ERROR_RATE
+  THROUGHPUT
+  CUSTOM
+}
+
+enum ErrorSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+// Compliance & Ethics Enums
+enum AuditAction {
+  CREATE
+  READ
+  UPDATE
+  DELETE
+  EXECUTE
+  LOGIN
+  LOGOUT
+  ERROR
+}
+
+enum ConsentType {
+  DATA_PROCESSING
+  ANALYTICS
+  MARKETING
+  THIRD_PARTY_SHARING
+}
+
+// Base model with common fields for timestamp tracking and soft deletion
+model BaseModel {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+}
+
+// User model expanded for multi-agent system
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String?
+  avatar        String?
+  isActive      Boolean  @default(true)
+  lastLoginAt   DateTime?
+  preferences   Json?    // User preferences stored as JSON
+  settings      Json?    // User settings stored as JSON
+  
+  // Timestamp tracking
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  deletedAt     DateTime?
+  
+  // Relationships
+  posts         Post[]
+  sessions      UserSession[]
+  permissions   UserPermission[]
+  agents        Agent[]
+  workflows     Workflow[]
+  auditLogs     AuditLog[]
+  consentRecords ConsentRecord[]
+  oauthTokens   OAuthToken[]
+  serviceConnections ServiceConnection[]
+  
+  @@map("users")
+}
+
+// Post model (keeping for backward compatibility)
 model Post {
   id        String   @id @default(cuid())
   title     String
@@ -29,4 +206,585 @@ model Post {
   authorId  String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  deletedAt DateTime?
+  
+  // Relationships
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  
+  @@map("posts")
+}
+
+// AGENT MANAGEMENT MODELS
+// Core Agent model representing different agent types
+model Agent {
+  id          String      @id @default(cuid())
+  name        String
+  description String?
+  type        AgentType
+  status      AgentStatus @default(IDLE)
+  version     String      @default("1.0.0")
+  config      Json        // Agent configuration stored as JSON
+  metadata    Json?       // Additional metadata
+  isActive    Boolean     @default(true)
+  
+  // Timestamp tracking
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  deletedAt   DateTime?
+  
+  // Relationships
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  executions  AgentExecution[]
+  states      AgentState[]
+  configurations AgentConfiguration[]
+  workflowSteps WorkflowStep[]
+  
+  @@map("agents")
+  @@index([userId])
+  @@index([type])
+  @@index([status])
+}
+
+// Agent configuration for different environments and versions
+model AgentConfiguration {
+  id          String   @id @default(cuid())
+  name        String
+  version     String
+  config      Json     // Configuration parameters
+  environment String   @default("production") // production, staging, development
+  isActive    Boolean  @default(true)
+  
+  // Timestamp tracking
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  
+  // Relationships
+  agentId     String
+  agent       Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  
+  @@map("agent_configurations")
+  @@index([agentId])
+  @@index([environment])
+}
+
+// Agent state tracking for persistence and recovery
+model AgentState {
+  id        String   @id @default(cuid())
+  state     Json     // Current state data
+  context   Json?    // Context information
+  metadata  Json?    // Additional state metadata
+  
+  // Timestamp tracking
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relationships
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  
+  @@map("agent_states")
+  @@index([agentId])
+  @@index([createdAt])
+}
+
+// Agent execution history and tracking
+model AgentExecution {
+  id          String              @id @default(cuid())
+  status      AgentExecutionStatus @default(PENDING)
+  input       Json?               // Input data
+  output      Json?               // Output data
+  error       String?             // Error message if failed
+  startTime   DateTime?
+  endTime     DateTime?
+  duration    Int?                // Duration in milliseconds
+  metadata    Json?               // Execution metadata
+  
+  // Timestamp tracking
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  
+  // Relationships
+  agentId     String
+  agent       Agent               @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  workflowStepId String?
+  workflowStep WorkflowStep?      @relation(fields: [workflowStepId], references: [id])
+  
+  @@map("agent_executions")
+  @@index([agentId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// WORKFLOW SYSTEM MODELS
+// Workflow definition and orchestration
+model Workflow {
+  id          String         @id @default(cuid())
+  name        String
+  description String?
+  status      WorkflowStatus @default(DRAFT)
+  version     String         @default("1.0.0")
+  definition  Json           // Workflow definition (DAG, steps, etc.)
+  config      Json?          // Workflow configuration
+  metadata    Json?          // Additional metadata
+  isActive    Boolean        @default(true)
+  
+  // Timestamp tracking
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  deletedAt   DateTime?
+  
+  // Relationships
+  userId      String
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  executions  WorkflowExecution[]
+  steps       WorkflowStep[]
+  logs        WorkflowLog[]
+  
+  @@map("workflows")
+  @@index([userId])
+  @@index([status])
+}
+
+// Workflow execution instances
+model WorkflowExecution {
+  id          String         @id @default(cuid())
+  status      WorkflowStatus @default(PENDING)
+  input       Json?          // Input data
+  output      Json?          // Output data
+  error       String?        // Error message if failed
+  startTime   DateTime?
+  endTime     DateTime?
+  duration    Int?           // Duration in milliseconds
+  metadata    Json?          // Execution metadata
+  
+  // Timestamp tracking
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  
+  // Relationships
+  workflowId  String
+  workflow    Workflow       @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  steps       WorkflowStep[]
+  logs        WorkflowLog[]
+  
+  @@map("workflow_executions")
+  @@index([workflowId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Individual workflow steps
+model WorkflowStep {
+  id          String             @id @default(cuid())
+  name        String
+  type        WorkflowStepType
+  status      WorkflowStepStatus @default(PENDING)
+  config      Json               // Step configuration
+  input       Json?              // Input data
+  output      Json?              // Output data
+  error       String?            // Error message if failed
+  order       Int                // Step order in workflow
+  dependencies Json?             // Step dependencies
+  startTime   DateTime?
+  endTime     DateTime?
+  duration    Int?               // Duration in milliseconds
+  metadata    Json?              // Step metadata
+  
+  // Timestamp tracking
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  
+  // Relationships
+  workflowId  String
+  workflow    Workflow           @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  executionId String?
+  execution   WorkflowExecution? @relation(fields: [executionId], references: [id])
+  agentId     String?
+  agent       Agent?             @relation(fields: [agentId], references: [id])
+  executions  AgentExecution[]
+  
+  @@map("workflow_steps")
+  @@index([workflowId])
+  @@index([executionId])
+  @@index([status])
+  @@index([order])
+}
+
+// Workflow execution logs
+model WorkflowLog {
+  id        String   @id @default(cuid())
+  level     String   @default("INFO") // INFO, WARN, ERROR, DEBUG
+  message   String
+  data      Json?    // Log data
+  metadata  Json?    // Additional metadata
+  
+  // Timestamp tracking
+  createdAt DateTime @default(now())
+  
+  // Relationships
+  workflowId String
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  executionId String?
+  execution  WorkflowExecution? @relation(fields: [executionId], references: [id])
+  
+  @@map("workflow_logs")
+  @@index([workflowId])
+  @@index([executionId])
+  @@index([createdAt])
+}
+
+// AUTHENTICATION & AUTHORIZATION MODELS
+// OAuth token management
+model OAuthToken {
+  id          String       @id @default(cuid())
+  provider    OAuthProvider
+  accessToken String
+  refreshToken String?
+  tokenType   TokenType    @default(ACCESS)
+  expiresAt   DateTime?
+  scope       String?
+  metadata    Json?        // Additional token metadata
+  
+  // Timestamp tracking
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  
+  // Relationships
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("oauth_tokens")
+  @@index([userId])
+  @@index([provider])
+  @@index([expiresAt])
+}
+
+// User session management
+model UserSession {
+  id           String   @id @default(cuid())
+  sessionId    String   @unique
+  refreshToken String?
+  expiresAt    DateTime
+  isActive     Boolean  @default(true)
+  userAgent    String?
+  ipAddress    String?
+  metadata     Json?    // Session metadata
+  
+  // Timestamp tracking
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  // Relationships
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("user_sessions")
+  @@index([userId])
+  @@index([sessionId])
+  @@index([expiresAt])
+}
+
+// Permission management
+model Permission {
+  id          String         @id @default(cuid())
+  name        String         @unique
+  description String?
+  type        PermissionType
+  resource    String         // Resource identifier
+  action      String         // Action identifier
+  conditions  Json?          // Conditions for permission
+  
+  // Timestamp tracking
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  
+  // Relationships
+  userPermissions UserPermission[]
+  
+  @@map("permissions")
+  @@index([type])
+  @@index([resource])
+}
+
+// User permission assignments
+model UserPermission {
+  id           String   @id @default(cuid())
+  granted      Boolean  @default(true)
+  conditions   Json?    // Additional conditions
+  
+  // Timestamp tracking
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  // Relationships
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  
+  @@map("user_permissions")
+  @@index([userId])
+  @@index([permissionId])
+  @@unique([userId, permissionId])
+}
+
+// Service connection management
+model ServiceConnection {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   // Service type (e.g., "email", "calendar", "storage")
+  config      Json     // Connection configuration
+  isActive    Boolean  @default(true)
+  metadata    Json?    // Additional metadata
+  
+  // Timestamp tracking
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  
+  // Relationships
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("service_connections")
+  @@index([userId])
+  @@index([type])
+}
+
+// LLM INTEGRATION MODELS
+// LLM model configuration
+model LLMModel {
+  id          String       @id @default(cuid())
+  name        String
+  provider    LLMProvider
+  modelType   LLMModelType
+  config      Json         // Model configuration
+  isActive    Boolean      @default(true)
+  metadata    Json?        // Additional metadata
+  
+  // Timestamp tracking
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  deletedAt   DateTime?
+  
+  // Relationships
+  apiUsage    APIUsage[]
+  
+  @@map("llm_models")
+  @@index([provider])
+  @@index([modelType])
+  @@index([isActive])
+}
+
+// API usage tracking
+model APIUsage {
+  id          String   @id @default(cuid())
+  requestCount Int      @default(0)
+  tokenCount   Int      @default(0)
+  cost         Float    @default(0)
+  metadata     Json?    // Usage metadata
+  
+  // Timestamp tracking
+  date        DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relationships
+  modelId     String
+  model       LLMModel @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  
+  @@map("api_usage")
+  @@index([modelId])
+  @@index([date])
+}
+
+// Cost tracking and billing
+model CostTracking {
+  id          String   @id @default(cuid())
+  userId      String
+  description String
+  amount      Float
+  currency    String   @default("USD")
+  category    String   // Cost category
+  metadata    Json?    // Cost metadata
+  
+  // Timestamp tracking
+  date        DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("cost_tracking")
+  @@index([userId])
+  @@index([date])
+  @@index([category])
+}
+
+// MONITORING & ANALYTICS MODELS
+// System metrics collection
+model SystemMetric {
+  id          String     @id @default(cuid())
+  type        MetricType
+  name        String
+  value       Float
+  unit        String?    // Unit of measurement
+  metadata    Json?      // Metric metadata
+  
+  // Timestamp tracking
+  timestamp   DateTime   @default(now())
+  createdAt   DateTime   @default(now())
+  
+  @@map("system_metrics")
+  @@index([type])
+  @@index([timestamp])
+}
+
+// Performance data tracking
+model PerformanceData {
+  id          String   @id @default(cuid())
+  endpoint    String
+  method      String
+  responseTime Int     // Response time in milliseconds
+  statusCode  Int
+  requestSize Int?     // Request size in bytes
+  responseSize Int?    // Response size in bytes
+  metadata    Json?    // Performance metadata
+  
+  // Timestamp tracking
+  timestamp   DateTime @default(now())
+  createdAt   DateTime @default(now())
+  
+  @@map("performance_data")
+  @@index([endpoint])
+  @@index([method])
+  @@index([statusCode])
+  @@index([timestamp])
+}
+
+// Error logging and tracking
+model ErrorLog {
+  id          String       @id @default(cuid())
+  message     String
+  stackTrace  String?
+  severity    ErrorSeverity @default(MEDIUM)
+  context     Json?        // Error context
+  metadata    Json?        // Error metadata
+  
+  // Timestamp tracking
+  timestamp   DateTime     @default(now())
+  createdAt   DateTime     @default(now())
+  
+  @@map("error_logs")
+  @@index([severity])
+  @@index([timestamp])
+}
+
+// VECTOR STORAGE MODELS
+// Embedding storage for semantic search
+model Embedding {
+  id          String   @id @default(cuid())
+  content     String
+  vector      String   // Vector stored as string (JSON array)
+  metadata    Json?    // Embedding metadata
+  dimension   Int      // Vector dimension
+  
+  // Timestamp tracking
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("embeddings")
+  @@index([createdAt])
+}
+
+// Vector index for efficient search
+model VectorIndex {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  config      Json     // Index configuration
+  isActive    Boolean  @default(true)
+  metadata    Json?    // Index metadata
+  
+  // Timestamp tracking
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  
+  @@map("vector_indices")
+  @@index([isActive])
+}
+
+// COMPLIANCE & ETHICS MODELS
+// Audit trail for compliance
+model AuditLog {
+  id          String     @id @default(cuid())
+  action      AuditAction
+  resource    String     // Resource identifier
+  resourceId  String     // Resource ID
+  changes     Json?      // Changes made
+  context     Json?      // Action context
+  ipAddress   String?
+  userAgent   String?
+  metadata    Json?      // Audit metadata
+  
+  // Timestamp tracking
+  timestamp   DateTime   @default(now())
+  createdAt   DateTime   @default(now())
+  
+  // Relationships
+  userId      String?
+  user        User?      @relation(fields: [userId], references: [id])
+  
+  @@map("audit_logs")
+  @@index([userId])
+  @@index([action])
+  @@index([resource])
+  @@index([timestamp])
+}
+
+// Consent tracking for compliance
+model ConsentRecord {
+  id          String     @id @default(cuid())
+  type        ConsentType
+  granted     Boolean    @default(true)
+  version     String     // Consent version
+  ipAddress   String?
+  userAgent   String?
+  metadata    Json?      // Consent metadata
+  
+  // Timestamp tracking
+  grantedAt   DateTime   @default(now())
+  revokedAt   DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  
+  // Relationships
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("consent_records")
+  @@index([userId])
+  @@index([type])
+  @@index([granted])
+}
+
+// Transparency records for ethics
+model TransparencyRecord {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  content     String
+  version     String   @default("1.0.0")
+  isActive    Boolean  @default(true)
+  metadata    Json?    // Transparency metadata
+  
+  // Timestamp tracking
+  publishedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("transparency_records")
+  @@index([isActive])
+  @@index([publishedAt])
 }

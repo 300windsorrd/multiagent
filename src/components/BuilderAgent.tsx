@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Separator } from '@/components/ui/separator'
 import { useToast } from '@/hooks/use-toast'
+import AuthManager from '@/components/auth/AuthManager'
 import { 
   Bot, 
   Shield, 
@@ -384,69 +385,7 @@ export default function BuilderAgent() {
 
         {/* Authentication Tab */}
         <TabsContent value="auth" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Service Authentication</CardTitle>
-              <CardDescription>
-                Connect your accounts to enable agent functionality
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {authProviders.map((provider) => (
-                  <Card key={provider.id}>
-                    <CardHeader className="pb-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          {provider.icon}
-                          <CardTitle className="text-lg">{provider.name}</CardTitle>
-                        </div>
-                        {getStatusIcon(provider.status)}
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <div className="space-y-1">
-                        <span className="text-sm font-medium">Scopes:</span>
-                        <div className="flex flex-wrap gap-1">
-                          {provider.scopes.map((scope) => (
-                            <Badge key={scope} variant="outline" className="text-xs">
-                              {scope}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                      {provider.status === 'disconnected' && (
-                        <Button 
-                          onClick={() => handleAuthConnect(provider.id)}
-                          className="w-full"
-                          size="sm"
-                        >
-                          Connect
-                        </Button>
-                      )}
-                      {provider.status === 'connecting' && (
-                        <Button disabled className="w-full" size="sm">
-                          Connecting...
-                        </Button>
-                      )}
-                      {provider.status === 'connected' && (
-                        <Button variant="outline" className="w-full" size="sm">
-                          Manage
-                        </Button>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Alert>
-            <Shield className="h-4 w-4" />
-            <AlertDescription>
-              All connections use OAuth 2.0 with minimal required scopes. Data is processed locally and never shared with third parties.
-            </AlertDescription>
-          </Alert>
+          <AuthManager />
         </TabsContent>
 
         {/* Monitoring Tab */}
