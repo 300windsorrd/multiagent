@@ -1,3 +1,18 @@
 [submodule "react-bits"]
 	path = react-bits
 	url = https://github.com/DavidHDev/react-bits.git
+[submodule "autogen"]
+	path = autogen
+	url = https://github.com/microsoft/autogen.git
+[submodule "crewAI"]
+	path = crewAI
+	url = https://github.com/crewAIInc/crewAI.git
+[submodule "langgraph"]
+	path = langgraph
+	url = https://github.com/langchain-ai/langgraph.git
+[submodule "langchain"]
+	path = langchain
+	url = https://github.com/langchain-ai/langchain.git
+[submodule "Flowise"]
+	path = Flowise
+	url = https://github.com/FlowiseAI/Flowise.git
