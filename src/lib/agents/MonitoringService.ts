@@ -1,31 +1,21 @@
 import {
-  ILogger
+  ILogger,
+  IMonitoringService,
+  IMetric,
+  IAlert,
+  MetricFilter,
+  IAgentStats,
+  ISystemStats
 } from './types'
 import { EventEmitter } from 'events'
 import { v4 as uuidv4 } from 'uuid'
 
-interface IMonitoringService {
-  recordMetric(agentId: string, metric: any): Promise<void>
-  getMetrics(agentId: string, filter?: any): Promise<any[]>
-  createAlert(alert: any): Promise<void>
-  getAlerts(agentId?: string): Promise<any[]>
-  resolveAlert(alertId: string): Promise<boolean>
-  addHealthCheck(agentId: string, healthCheck: any): Promise<void>
-  removeHealthCheck(agentId: string, checkName: string): Promise<void>
-  getHealthStatus(agentId?: string): Promise<any>
-  recordPerformanceMetric(agentId: string, metric: any): Promise<void>
-  getPerformanceMetrics(agentId?: string, timeRange?: any): Promise<any[]>
-  getMonitoringStats(agentId?: string): Promise<any>
-  addAlertThreshold(agentId: string, threshold: any): Promise<void>
-  removeAlertThreshold(agentId: string, thresholdName: string): Promise<void>
-}
-
 export class MonitoringService extends EventEmitter implements IMonitoringService {
   private logger: ILogger
-  private metrics: Map<string, Metric[]> = new Map()
-  private alerts: Map<string, Alert[]> = new Map()
+  private metrics: Map<string, IMetric[]> = new Map()
+  private alerts: Map<string, IAlert[]> = new Map()
   private healthChecks: Map<string, HealthCheck[]> = new Map()
-  private performanceMetrics: Map<string, PerformanceMetric[]> = new Map()
+  private performanceMetrics: Map<string, IMetric[]> = new Map()
   private maxMetricsSize: number = 10000
   private maxAlertsSize: number = 1000
   private maxHealthChecksSize: number = 1000
@@ -40,7 +30,7 @@ export class MonitoringService extends EventEmitter implements IMonitoringServic
     this.startHealthChecks()
   }
 
-  async recordMetric(agentId: string, metric: Metric): Promise<void> {
+  async recordMetric(agentId: string, metric: IMetric): Promise<void> {
     try {
       this.logger.debug(`Recording metric for agent ${agentId}`, { agentId, metric })
 
@@ -72,9 +62,9 @@ export class MonitoringService extends EventEmitter implements IMonitoringServic
     }
   }
 
-  async getMetrics(agentId?: string, type?: string, timeRange?: TimeRange): Promise<Metric[]> {
+  async getMetrics(agentId?: string, filter?: MetricFilter): Promise<IMetric[]> {
     try {
-      let metrics: Metric[] = []
+      let metrics: IMetric[] = []
 
       if (agentId) {
         // Get metrics for specific agent
@@ -87,15 +77,13 @@ export class MonitoringService extends EventEmitter implements IMonitoringServic
       }
 
       // Filter by type if specified
-      if (type) {
-        metrics = metrics.filter(m => m.type === type)
+      if (filter?.type) {
+        metrics = metrics.filter(m => m.type === filter.type)
       }
 
       // Filter by time range if specified
-      if (timeRange) {
-        const now = new Date()
-        const startTime = new Date(now.getTime() - timeRange.durationMs)
-        metrics = metrics.filter(m => m.timestamp >= startTime)
+      if (filter?.startTime && filter?.endTime) {
+        metrics = metrics.filter(m => m.timestamp >= filter.startTime! && m.timestamp <= filter.endTime!)
       }
 
       // Sort by timestamp (newest first)
@@ -103,14 +91,98 @@ export class MonitoringService extends EventEmitter implements IMonitoringServic
 
       return metrics
     } catch (error) {
-      this.logger.error('Failed to get metrics', error as Error, { agentId, type, timeRange })
+      this.logger.error('Failed to get metrics', error as Error, { agentId, filter })
       throw error
     }
   }
 
-  async createAlert(alert: Alert): Promise<void> {
+  async getAgentStats(agentId: string): Promise<IAgentStats> {
     try {
-      this.logger.info(`Creating alert for agent ${alert.agentId}`, { alert })
+      const metrics = this.metrics.get(agentId) || []
+      const alerts = this.alerts.get(agentId) || []
+      
+      // Calculate stats
+      const totalTasks = metrics.filter(m => m.name === 'task_count').reduce((sum, m) => sum + m.value, 0)
+      const completedTasks = metrics.filter(m => m.name === 'completed_tasks').reduce((sum, m) => sum + m.value, 0)
+      const failedTasks = metrics.filter(m => m.name === 'failed_tasks').reduce((sum, m) => sum + m.value, 0)
+      const responseTimes = metrics.filter(m => m.name === 'response_time')
+      const averageResponseTime = responseTimes.length > 0
+        ? responseTimes.reduce((sum, m) => sum + m.value, 0) / responseTimes.length
+        : 0
+      const errorRate = totalTasks > 0 ? (failedTasks / totalTasks) * 100 : 0
+      const lastActivity = metrics.length > 0
+        ? metrics.reduce((latest, m) => m.timestamp > latest ? m.timestamp : latest, new Date(0))
+        : new Date()
+
+      return {
+        agentId,
+        totalTasks,
+        completedTasks,
+        failedTasks,
+        averageResponseTime,
+        uptime: Date.now() - lastActivity.getTime(),
+        errorRate,
+        lastActivity
+      }
+    } catch (error) {
+      this.logger.error(`Failed to get agent stats for ${agentId}`, error as Error)
+      throw error
+    }
+  }
+
+  async getSystemStats(): Promise<ISystemStats> {
+    try {
+      let totalTasks = 0
+      let completedTasks = 0
+      let failedTasks = 0
+      let totalResponseTime = 0
+      let responseTimeCount = 0
+      let systemStartTime = Date.now()
+
+      for (const [agentId, metrics] of this.metrics.entries()) {
+        const agentTasks = metrics.filter(m => m.name === 'task_count').reduce((sum, m) => sum + m.value, 0)
+        const agentCompleted = metrics.filter(m => m.name === 'completed_tasks').reduce((sum, m) => sum + m.value, 0)
+        const agentFailed = metrics.filter(m => m.name === 'failed_tasks').reduce((sum, m) => sum + m.value, 0)
+        const agentResponseTimes = metrics.filter(m => m.name === 'response_time')
+        
+        totalTasks += agentTasks
+        completedTasks += agentCompleted
+        failedTasks += agentFailed
+        
+        if (agentResponseTimes.length > 0) {
+          totalResponseTime += agentResponseTimes.reduce((sum, m) => sum + m.value, 0)
+          responseTimeCount += agentResponseTimes.length
+        }
+
+        // Find earliest activity
+        const earliestActivity = metrics.reduce((earliest, m) =>
+          m.timestamp < earliest ? m.timestamp : earliest, new Date())
+        if (earliestActivity.getTime() < systemStartTime) {
+          systemStartTime = earliestActivity.getTime()
+        }
+      }
+
+      const averageResponseTime = responseTimeCount > 0 ? totalResponseTime / responseTimeCount : 0
+      const systemUptime = Date.now() - systemStartTime
+
+      return {
+        totalAgents: this.metrics.size,
+        activeAgents: this.metrics.size, // Simplified - in reality would check actual activity
+        totalTasks,
+        completedTasks,
+        failedTasks,
+        averageResponseTime,
+        systemUptime
+      }
+    } catch (error) {
+      this.logger.error('Failed to get system stats', error as Error)
+      throw error
+    }
+  }
+
+  async createAlert(alert: IAlert): Promise<void> {
+    try {
+      this.logger.info(`Creating alert`, { alert })
 
       // Add timestamp if not provided
       if (!alert.timestamp) {
@@ -118,11 +190,12 @@ export class MonitoringService extends EventEmitter implements IMonitoringServic
       }
 
       // Store alert
-      if (!this.alerts.has(alert.agentId)) {
-        this.alerts.set(alert.agentId, [])
+      const agentId = alert.agentId || 'system'
+      if (!this.alerts.has(agentId)) {
+        this.alerts.set(agentId, [])
       }
 
-      const agentAlerts = this.alerts.get(alert.agentId)!
+      const agentAlerts = this.alerts.get(agentId)!
       agentAlerts.push(alert)
 
       // Keep only recent alerts
@@ -130,8 +203,8 @@ export class MonitoringService extends EventEmitter implements IMonitoringServic
         agentAlerts.splice(0, agentAlerts.length - this.maxAlertsSize)
       }
 
-      this.logger.info(`Alert created successfully for agent ${alert.agentId}`, {
-        agentId: alert.agentId,
+      this.logger.info(`Alert created successfully`, {
+        agentId,
         alertId: alert.id,
         severity: alert.severity
       })
@@ -139,14 +212,14 @@ export class MonitoringService extends EventEmitter implements IMonitoringServic
       // Emit event
       this.emit('alertCreated', { alert })
     } catch (error) {
-      this.logger.error(`Failed to create alert for agent ${alert.agentId}`, error as Error, { alert })
+      this.logger.error(`Failed to create alert`, error as Error, { alert })
       throw error
     }
   }
 
-  async getAlerts(agentId?: string, resolved?: boolean, severity?: string): Promise<Alert[]> {
+  async getAlerts(agentId?: string): Promise<IAlert[]> {
     try {
-      let alerts: Alert[] = []
+      let alerts: IAlert[] = []
 
       if (agentId) {
         // Get alerts for specific agent
@@ -158,22 +231,12 @@ export class MonitoringService extends EventEmitter implements IMonitoringServic
         }
       }
 
-      // Filter by resolved status if specified
-      if (resolved !== undefined) {
-        alerts = alerts.filter(a => a.resolved === resolved)
-      }
-
-      // Filter by severity if specified
-      if (severity) {
-        alerts = alerts.filter(a => a.severity === severity)
-      }
-
       // Sort by timestamp (newest first)
       alerts.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
 
       return alerts
     } catch (error) {
-      this.logger.error('Failed to get alerts', error as Error, { agentId, resolved, severity })
+      this.logger.error('Failed to get alerts', error as Error, { agentId })
       throw error
     }
   }
@@ -206,7 +269,7 @@ export class MonitoringService extends EventEmitter implements IMonitoringServic
     }
   }
 
-  async addHealthCheck(agentId: string, healthCheck: HealthCheck): Promise<void> {
+  async addHealthCheck(agentId: string, healthCheck: any): Promise<void> {
     try {
       this.logger.info(`Adding health check for agent ${agentId}`, { agentId, healthCheck })
 
@@ -244,7 +307,7 @@ export class MonitoringService extends EventEmitter implements IMonitoringServic
     }
   }
 
-  async getHealthStatus(agentId?: string): Promise<HealthStatus> {
+  async getHealthStatus(agentId?: string): Promise<any> {
     try {
       let overallStatus: HealthStatusValue = 'HEALTHY'
       const agentStatuses: Record<string, HealthStatusValue> = {}
@@ -289,7 +352,7 @@ export class MonitoringService extends EventEmitter implements IMonitoringServic
     }
   }
 
-  async recordPerformanceMetric(agentId: string, metric: PerformanceMetric): Promise<void> {
+  async recordPerformanceMetric(agentId: string, metric: IMetric): Promise<void> {
     try {
       this.logger.debug(`Recording performance metric for agent ${agentId}`, { agentId, metric })
 
@@ -318,9 +381,9 @@ export class MonitoringService extends EventEmitter implements IMonitoringServic
     }
   }
 
-  async getPerformanceMetrics(agentId?: string, timeRange?: TimeRange): Promise<PerformanceMetric[]> {
+  async getPerformanceMetrics(agentId?: string, timeRange?: any): Promise<IMetric[]> {
     try {
-      let metrics: PerformanceMetric[] = []
+      let metrics: IMetric[] = []
 
       if (agentId) {
         // Get performance metrics for specific agent
@@ -349,7 +412,7 @@ export class MonitoringService extends EventEmitter implements IMonitoringServic
     }
   }
 
-  async getMonitoringStats(agentId?: string): Promise<MonitoringStats> {
+  async getMonitoringStats(agentId?: string): Promise<any> {
     try {
       let totalMetrics = 0
       let totalAlerts = 0
@@ -403,7 +466,7 @@ export class MonitoringService extends EventEmitter implements IMonitoringServic
     }
   }
 
-  async addAlertThreshold(agentId: string, threshold: AlertThreshold): Promise<void> {
+  async addAlertThreshold(agentId: string, threshold: any): Promise<void> {
     try {
       this.logger.info(`Adding alert threshold for agent ${agentId}`, { agentId, threshold })
 
@@ -441,7 +504,7 @@ export class MonitoringService extends EventEmitter implements IMonitoringServic
     }
   }
 
-  private async checkAlertThresholds(agentId: string, metric: Metric): Promise<void> {
+  private async checkAlertThresholds(agentId: string, metric: IMetric): Promise<void> {
     try {
       const thresholds = this.alertThresholds.get(agentId)
       if (!thresholds || thresholds.length === 0) {
@@ -619,29 +682,7 @@ export class MonitoringService extends EventEmitter implements IMonitoringServic
   }
 }
 
-interface Metric {
-  id: string
-  agentId: string
-  type: string
-  name: string
-  value: number
-  unit: string
-  timestamp: Date
-  metadata?: any
-}
-
-interface Alert {
-  id: string
-  agentId: string
-  type: string
-  severity: string
-  message: string
-  timestamp: Date
-  metadata?: any
-  resolved: boolean
-  resolvedAt?: Date
-}
-
+// Additional interfaces for internal use
 interface HealthCheck {
   name: string
   execute: () => Promise<HealthCheckResult>
@@ -651,16 +692,6 @@ interface HealthCheckResult {
   name: string
   status: HealthStatusValue
   message: string
-  timestamp: Date
-  metadata?: any
-}
-
-interface PerformanceMetric {
-  id: string
-  agentId: string
-  name: string
-  value: number
-  unit: string
   timestamp: Date
   metadata?: any
 }
@@ -683,15 +714,6 @@ interface HealthStatus {
   agentStatuses: Record<string, HealthStatusValue>
   checkResults: HealthCheckResult[]
   timestamp: Date
-}
-
-interface MonitoringStats {
-  totalMetrics: number
-  totalAlerts: number
-  totalHealthChecks: number
-  totalPerformanceMetrics: number
-  resolvedAlerts: number
-  unresolvedAlerts: number
 }
 
 type HealthStatusValue = 'HEALTHY' | 'DEGRADED' | 'UNHEALTHY' | 'CRITICAL'

@@ -201,11 +201,30 @@ export interface TaskFilter {
 
 // State manager interface
 export interface IStateManager {
-  saveState(agentId: string, state: IAgentState): Promise<void>
-  loadState(agentId: string): Promise<IAgentState | null>
+  initialize(): Promise<void>
+  setState(agentId: string, state: IAgentState, reason?: string): Promise<void>
+  getState(agentId: string): Promise<IAgentState | null>
   deleteState(agentId: string): Promise<boolean>
   getLatestState(agentId: string): Promise<IAgentState | null>
   getStateHistory(agentId: string, limit?: number): Promise<IAgentState[]>
+  createSnapshot(agentId: string, reason?: string): Promise<StateSnapshot>
+  getSnapshots(agentId: string): Promise<StateSnapshot[]>
+  restoreSnapshot(agentId: string, snapshotId: string): Promise<boolean>
+  createBackup(agentId: string): Promise<string>
+  restoreBackup(agentId: string, backupId: string): Promise<boolean>
+  recover(agentId: string): Promise<boolean>
+  cleanup(): Promise<void>
+}
+
+// State snapshot interface
+export interface StateSnapshot {
+  id: string
+  agentId: string
+  state: IAgentState
+  version: number
+  timestamp: Date
+  checksum: string
+  metadata: Record<string, any>
 }
 
 // Monitoring interface
@@ -216,6 +235,7 @@ export interface IMonitoringService {
   getSystemStats(): Promise<ISystemStats>
   createAlert(alert: IAlert): Promise<void>
   getAlerts(agentId?: string): Promise<IAlert[]>
+  resolveAlert(alertId: string): Promise<boolean>
 }
 
 // Metric interface

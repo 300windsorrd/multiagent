@@ -1,7 +1,7 @@
-import { IAgentState } from './types'
-import { StateSnapshot } from './StateTypes'
+import { IAgentState, StateSnapshot } from './types'
 import { StateStorage } from './StateStorage'
 import { StateRecovery } from './StateRecovery'
+import { PrismaClient } from '@prisma/client'
 
 export interface IStateManager {
   initialize(): Promise<void>
@@ -27,8 +27,8 @@ export class StateManager implements IStateManager {
   private snapshotCache: Map<string, StateSnapshot[]> = new Map()
   private cacheTTL = 60000 // 1 minute cache TTL
 
-  constructor(db: any) {
-    this.storage = new StateStorage(db)
+  constructor(prisma: PrismaClient) {
+    this.storage = new StateStorage(prisma)
     this.recovery = new StateRecovery(this.storage)
   }
 
@@ -266,15 +266,20 @@ export class StateManager implements IStateManager {
     }
 
     try {
-      const success = await this.recovery.recover(agentId, this)
+      const recoveredState = await this.recovery.recover(agentId)
       
-      if (success) {
+      if (recoveredState) {
+        // Set the recovered state
+        await this.setState(agentId, recoveredState, 'Recovered from recovery point')
+        
         // Clear cache to ensure fresh state
         this.stateCache.delete(agentId)
         this.snapshotCache.delete(agentId)
+        
+        return true
       }
 
-      return success
+      return false
     } catch (error) {
       console.error(`Failed to recover agent ${agentId}:`, error)
       throw error

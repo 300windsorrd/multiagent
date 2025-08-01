@@ -1,0 +1,3 @@
+[submodule "react-bits"]
+	path = react-bits
+	url = https://github.com/DavidHDev/react-bits.git

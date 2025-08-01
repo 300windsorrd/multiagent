@@ -1,5 +1,4 @@
-import { IAgentState } from './types'
-import { StateSnapshot } from './StateTypes'
+import { IAgentState, StateSnapshot } from './types'
 import { IStateStorage } from './StateStorage'
 
 export interface IStateRecovery {
@@ -72,7 +71,7 @@ export class StateRecovery implements IStateRecovery {
       }
 
       // If no valid recovery point found, try to repair the latest state
-      const latestState = await this.storage.getLatestState(agentId)
+      const latestState = await this.storage.loadState(agentId)
       if (latestState) {
         const isValid = await this.validateState(latestState)
         if (!isValid) {
@@ -158,9 +157,9 @@ export class StateRecovery implements IStateRecovery {
       if (!isValid) {
         console.warn(`Recovery point ${recoveryPointId} is invalid, attempting repair`)
         const repairedState = await this.repairState(snapshot.state)
-        await this.storage.setState(agentId, repairedState, `Restored from recovery point ${recoveryPointId}`)
+        await this.storage.saveState(agentId, repairedState)
       } else {
-        await this.storage.setState(agentId, snapshot.state, `Restored from recovery point ${recoveryPointId}`)
+        await this.storage.saveState(agentId, snapshot.state)
       }
 
       return true
@@ -210,12 +209,17 @@ export class StateRecovery implements IStateRecovery {
   public async validateState(state: IAgentState): Promise<boolean> {
     try {
       // Basic validation checks
-      if (!state || !state.agentId || !state.status) {
+      if (!state || !state.id) {
         return false
       }
 
       // Validate state structure
-      if (typeof state.agentId !== 'string' || typeof state.status !== 'string') {
+      if (typeof state.id !== 'string') {
+        return false
+      }
+
+      // Validate state object
+      if (!state.state || typeof state.state !== 'object') {
         return false
       }
 
@@ -240,13 +244,6 @@ export class StateRecovery implements IStateRecovery {
         }
       }
 
-      // Validate data if present
-      if (state.data) {
-        if (typeof state.data !== 'object') {
-          return false
-        }
-      }
-
       return true
     } catch (error) {
       console.error('State validation failed:', error)
@@ -258,14 +255,14 @@ export class StateRecovery implements IStateRecovery {
     try {
       const repairedState = { ...state }
 
-      // Repair agentId if missing or invalid
-      if (!repairedState.agentId || typeof repairedState.agentId !== 'string') {
-        repairedState.agentId = 'unknown_agent'
+      // Repair id if missing or invalid
+      if (!repairedState.id || typeof repairedState.id !== 'string') {
+        repairedState.id = `repaired_${Date.now()}`
       }
 
-      // Repair status if missing or invalid
-      if (!repairedState.status || typeof repairedState.status !== 'string') {
-        repairedState.status = 'unknown'
+      // Repair state object if missing or invalid
+      if (!repairedState.state || typeof repairedState.state !== 'object') {
+        repairedState.state = {}
       }
 
       // Repair metadata if invalid
@@ -283,11 +280,6 @@ export class StateRecovery implements IStateRecovery {
         repairedState.context = {}
       }
 
-      // Repair data if invalid
-      if (!repairedState.data || typeof repairedState.data !== 'object') {
-        repairedState.data = {}
-      }
-
       // Add repair metadata
       repairedState.metadata.repaired = true
       repairedState.metadata.repairedAt = new Date()
@@ -298,8 +290,8 @@ export class StateRecovery implements IStateRecovery {
       console.error('State repair failed:', error)
       // Return a minimal valid state if repair fails
       return {
-        agentId: 'recovered_agent',
-        status: 'recovered',
+        id: `recovered_${Date.now()}`,
+        state: {},
         metadata: {
           repaired: true,
           repairedAt: new Date(),
@@ -307,8 +299,7 @@ export class StateRecovery implements IStateRecovery {
           error: error instanceof Error ? error.message : 'Unknown error'
         },
         lastUpdated: new Date(),
-        context: {},
-        data: {}
+        context: {}
       }
     }
   }

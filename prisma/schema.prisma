@@ -240,6 +240,8 @@ model Agent {
   states      AgentState[]
   configurations AgentConfiguration[]
   workflowSteps WorkflowStep[]
+  snapshots    StateSnapshot[]
+  backups      StateBackup[]
   
   @@map("agents")
   @@index([userId])
@@ -284,9 +286,56 @@ model AgentState {
   // Relationships
   agentId   String
   agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  snapshots StateSnapshot[]
+  backups   StateBackup[]
   
   @@map("agent_states")
+  @@unique([agentId])
+  @@index([createdAt])
+}
+
+// State snapshots for versioning and rollback
+model StateSnapshot {
+  id        String   @id @default(cuid())
+  version   Int      @default(1)
+  checksum  String
+  reason    String?
+  metadata  Json?    // Snapshot metadata
+  
+  // Timestamp tracking
+  createdAt DateTime @default(now())
+  
+  // Relationships
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  stateId   String
+  state     AgentState @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  
+  @@map("state_snapshots")
   @@index([agentId])
+  @@index([createdAt])
+  @@index([version])
+}
+
+// State backups for disaster recovery
+model StateBackup {
+  id        String   @id @default(cuid())
+  backupId  String   @unique // External backup identifier
+  metadata  Json?    // Backup metadata
+  
+  // Timestamp tracking
+  createdAt DateTime @default(now())
+  restoredAt DateTime?
+  
+  // Relationships
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  stateId   String
+  state     AgentState @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  
+  @@map("state_backups")
+  @@index([agentId])
+  @@index([backupId])
   @@index([createdAt])
 }
 

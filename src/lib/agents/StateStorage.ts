@@ -1,5 +1,5 @@
-import { IAgentState } from './types'
-import { StateSnapshot } from './StateTypes'
+import { IAgentState, StateSnapshot } from './types'
+import { PrismaClient } from '@prisma/client'
 
 export interface IStateStorage {
   initialize(): Promise<void>
@@ -14,14 +14,11 @@ export interface IStateStorage {
 }
 
 export class StateStorage implements IStateStorage {
-  private db: any
+  private prisma: PrismaClient
   private initialized = false
-  private stateCollection = 'agent_states'
-  private snapshotCollection = 'agent_snapshots'
-  private backupCollection = 'agent_backups'
 
-  constructor(db: any) {
-    this.db = db
+  constructor(prisma: PrismaClient) {
+    this.prisma = prisma
   }
 
   public async initialize(): Promise<void> {
@@ -30,8 +27,8 @@ export class StateStorage implements IStateStorage {
     }
 
     try {
-      // Initialize database collections/tables
-      // This is a mock implementation - in production, you would initialize actual database tables
+      // Test database connection
+      await this.prisma.$connect()
       this.initialized = true
     } catch (error) {
       console.error('Failed to initialize StateStorage:', error)
@@ -45,15 +42,31 @@ export class StateStorage implements IStateStorage {
     }
 
     try {
-      // In a real implementation, this would save to a database
-      // For now, we'll use in-memory storage
-      const key = `${this.stateCollection}:${agentId}`
-      const serializedState = JSON.stringify(state)
-      
-      // Mock database save
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(key, serializedState)
+      // Check if agent exists
+      const agent = await this.prisma.agent.findUnique({
+        where: { id: agentId }
+      })
+
+      if (!agent) {
+        throw new Error(`Agent ${agentId} not found`)
       }
+
+      // Create or update agent state
+      await this.prisma.agentState.upsert({
+        where: { agentId },
+        update: {
+          state: state.state,
+          context: state.context,
+          metadata: state.metadata,
+          updatedAt: new Date()
+        },
+        create: {
+          agentId,
+          state: state.state,
+          context: state.context,
+          metadata: state.metadata
+        }
+      })
     } catch (error) {
       console.error(`Failed to save state for agent ${agentId}:`, error)
       throw error
@@ -66,18 +79,22 @@ export class StateStorage implements IStateStorage {
     }
 
     try {
-      // In a real implementation, this would load from a database
-      const key = `${this.stateCollection}:${agentId}`
-      
-      // Mock database load
-      if (typeof localStorage !== 'undefined') {
-        const serializedState = localStorage.getItem(key)
-        if (serializedState) {
-          return JSON.parse(serializedState)
-        }
+      const agentState = await this.prisma.agentState.findFirst({
+        where: { agentId },
+        orderBy: { createdAt: 'desc' }
+      })
+
+      if (!agentState) {
+        return null
       }
-      
-      return null
+
+      return {
+        id: agentState.id,
+        state: agentState.state as Record<string, any>,
+        context: (agentState.context as Record<string, any>) || {},
+        metadata: (agentState.metadata as Record<string, any>) || {},
+        lastUpdated: agentState.updatedAt
+      }
     } catch (error) {
       console.error(`Failed to load state for agent ${agentId}:`, error)
       throw error
@@ -90,13 +107,9 @@ export class StateStorage implements IStateStorage {
     }
 
     try {
-      // In a real implementation, this would delete from a database
-      const key = `${this.stateCollection}:${agentId}`
-      
-      // Mock database delete
-      if (typeof localStorage !== 'undefined') {
-        localStorage.removeItem(key)
-      }
+      await this.prisma.agentState.deleteMany({
+        where: { agentId }
+      })
       
       return true
     } catch (error) {
@@ -111,14 +124,30 @@ export class StateStorage implements IStateStorage {
     }
 
     try {
-      // In a real implementation, this would save to a database
-      const key = `${this.snapshotCollection}:${agentId}:${snapshot.id}`
-      const serializedSnapshot = JSON.stringify(snapshot)
-      
-      // Mock database save
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(key, serializedSnapshot)
+      // First, save the state
+      await this.saveState(agentId, snapshot.state)
+
+      // Get the saved state record
+      const agentState = await this.prisma.agentState.findFirst({
+        where: { agentId },
+        orderBy: { createdAt: 'desc' }
+      })
+
+      if (!agentState) {
+        throw new Error(`Failed to save state for snapshot creation`)
       }
+
+      // Create the snapshot
+      await this.prisma.stateSnapshot.create({
+        data: {
+          agentId,
+          stateId: agentState.id,
+          version: snapshot.version,
+          checksum: snapshot.checksum,
+          reason: snapshot.metadata?.reason || 'Manual snapshot',
+          metadata: snapshot.metadata
+        }
+      })
     } catch (error) {
       console.error(`Failed to save snapshot for agent ${agentId}:`, error)
       throw error
@@ -131,24 +160,29 @@ export class StateStorage implements IStateStorage {
     }
 
     try {
-      // In a real implementation, this would load from a database
-      const snapshots: StateSnapshot[] = []
-      
-      // Mock database load
-      if (typeof localStorage !== 'undefined') {
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i)
-          if (key && key.startsWith(`${this.snapshotCollection}:${agentId}:`)) {
-            const serializedSnapshot = localStorage.getItem(key)
-            if (serializedSnapshot) {
-              snapshots.push(JSON.parse(serializedSnapshot))
-            }
-          }
-        }
-      }
-      
-      // Sort by timestamp (newest first)
-      return snapshots.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      const snapshots = await this.prisma.stateSnapshot.findMany({
+        where: { agentId },
+        include: {
+          state: true
+        },
+        orderBy: { createdAt: 'desc' }
+      })
+
+      return snapshots.map(snapshot => ({
+        id: snapshot.id,
+        agentId: snapshot.agentId,
+        state: {
+          id: snapshot.state.id,
+          state: snapshot.state.state as Record<string, any>,
+          context: (snapshot.state.context as Record<string, any>) || {},
+          metadata: (snapshot.state.metadata as Record<string, any>) || {},
+          lastUpdated: snapshot.state.updatedAt
+        },
+        version: snapshot.version,
+        timestamp: snapshot.createdAt,
+        checksum: snapshot.checksum,
+        metadata: (snapshot.metadata as Record<string, any>) || {}
+      }))
     } catch (error) {
       console.error(`Failed to load snapshots for agent ${agentId}:`, error)
       throw error
@@ -163,14 +197,31 @@ export class StateStorage implements IStateStorage {
     try {
       const backupId = `${agentId}_${Date.now()}_backup`
       
-      // In a real implementation, this would save to a database
-      const key = `${this.backupCollection}:${backupId}`
-      const serializedState = JSON.stringify(state)
-      
-      // Mock database save
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(key, serializedState)
+      // First, save the state
+      await this.saveState(agentId, state)
+
+      // Get the saved state record
+      const agentState = await this.prisma.agentState.findFirst({
+        where: { agentId },
+        orderBy: { createdAt: 'desc' }
+      })
+
+      if (!agentState) {
+        throw new Error(`Failed to save state for backup creation`)
       }
+
+      // Create the backup
+      await this.prisma.stateBackup.create({
+        data: {
+          agentId,
+          stateId: agentState.id,
+          backupId,
+          metadata: {
+            createdAt: new Date(),
+            reason: 'Automatic backup'
+          }
+        }
+      })
       
       return backupId
     } catch (error) {
@@ -185,18 +236,31 @@ export class StateStorage implements IStateStorage {
     }
 
     try {
-      // In a real implementation, this would load from a database
-      const key = `${this.backupCollection}:${backupId}`
-      
-      // Mock database load
-      if (typeof localStorage !== 'undefined') {
-        const serializedState = localStorage.getItem(key)
-        if (serializedState) {
-          return JSON.parse(serializedState)
+      const backup = await this.prisma.stateBackup.findUnique({
+        where: { backupId },
+        include: {
+          state: true
         }
+      })
+
+      if (!backup) {
+        return null
       }
-      
-      return null
+
+      // Update the backup restore timestamp
+      await this.prisma.stateBackup.update({
+        where: { id: backup.id },
+        data: { restoredAt: new Date() }
+      })
+
+      // Return the restored state
+      return {
+        id: backup.state.id,
+        state: backup.state.state as Record<string, any>,
+        context: (backup.state.context as Record<string, any>) || {},
+        metadata: (backup.state.metadata as Record<string, any>) || {},
+        lastUpdated: backup.state.updatedAt
+      }
     } catch (error) {
       console.error(`Failed to restore backup ${backupId} for agent ${agentId}:`, error)
       throw error
@@ -209,8 +273,7 @@ export class StateStorage implements IStateStorage {
     }
 
     try {
-      // In a real implementation, this would clean up database resources
-      // For now, we'll just reset the initialization flag
+      await this.prisma.$disconnect()
       this.initialized = false
     } catch (error) {
       console.error('Failed to cleanup StateStorage:', error)

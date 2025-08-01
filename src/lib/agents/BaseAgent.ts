@@ -72,7 +72,7 @@ export abstract class BaseAgent implements IAgent {
       this.logger.info(`Initializing agent ${this.name}`, { agentId: this.id, type: this.type })
       
       // Load previous state if exists
-      const previousState = await this.stateManager.loadState(this.id)
+      const previousState = await this.stateManager.getState(this.id)
       if (previousState) {
         this.logger.info(`Loaded previous state for agent ${this.id}`, { agentId: this.id })
       }
@@ -278,7 +278,7 @@ export abstract class BaseAgent implements IAgent {
 
       // Save final state
       const currentState = await this.getState()
-      await this.stateManager.saveState(this.id, currentState)
+      await this.stateManager.setState(this.id, currentState, 'Agent cleanup')
 
       this.isInitialized = false
       this.isRunning = false
